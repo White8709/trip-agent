@@ -1,0 +1,12 @@
+# Rust
+backend/target/
+backend/data/
+backend/.env
+
+# Frontend
+frontend/node_modules/
+frontend/dist/
+*.tsbuildinfo
+
+# OS
+.DS_Store
