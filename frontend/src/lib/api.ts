@@ -197,3 +197,34 @@ export async function generateGuideAudio(
   );
   return res.audio_url;
 }
+
+export interface ChatMessage {
+  role: 'user' | 'model';
+  content: string;
+}
+
+export async function chatWithDay(
+  tripId: string,
+  dayNumber: number,
+  messages: ChatMessage[],
+): Promise<string> {
+  const res = await requestJson<{ reply: string }>(
+    `/api/trips/${encodeURIComponent(tripId)}/days/${dayNumber}/chat`,
+    {
+      method: 'POST',
+      body: JSON.stringify({ messages }),
+    },
+  );
+  return res.reply;
+}
+
+export async function chatWithItem(
+  itemId: number,
+  messages: ChatMessage[],
+): Promise<string> {
+  const res = await requestJson<{ reply: string }>(`/api/items/${itemId}/chat`, {
+    method: 'POST',
+    body: JSON.stringify({ messages }),
+  });
+  return res.reply;
+}

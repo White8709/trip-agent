@@ -1,0 +1,9 @@
+.git
+.DS_Store
+backend/target
+backend/data
+backend/.env
+frontend/node_modules
+frontend/dist
+*.tsbuildinfo
+data

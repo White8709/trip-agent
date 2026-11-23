@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { DayChatSheet } from '../components/DayChatSheet';
 import { Trip, TripItem } from '../lib/api';
 import {
   formatDateWithWeekday,
@@ -13,7 +14,6 @@ interface TimelinePageProps {
   onToggleTheme: () => void;
   onOpenDeviceModal: () => void;
   onSelectGuide: (item: TripItem) => void;
-  onOpenImport: () => void;
 }
 
 export const TimelinePage: React.FC<TimelinePageProps> = ({
@@ -22,14 +22,15 @@ export const TimelinePage: React.FC<TimelinePageProps> = ({
   onToggleTheme,
   onOpenDeviceModal,
   onSelectGuide,
-  onOpenImport,
 }) => {
   const [selectedDayNumber, setSelectedDayNumber] = useState<number>(
     trip.days[0]?.day_number ?? 1,
   );
+  const [dayChatOpen, setDayChatOpen] = useState(false);
 
   useEffect(() => {
     setSelectedDayNumber(trip.days[0]?.day_number ?? 1);
+    setDayChatOpen(false);
   }, [trip.id]);
 
   const currentDay =
@@ -272,20 +273,29 @@ export const TimelinePage: React.FC<TimelinePageProps> = ({
         )}
       </main>
 
-      {/* Floating Action Button (FAB) */}
+      {/* Floating Action Button (Day AI Chat) */}
       <aside className="fixed bottom-6 right-6 z-40 flex items-center gap-2 pb-safe">
         <div className="hidden sm:flex px-3 py-1.5 rounded-full bg-inverse-surface/90 dark:bg-black/90 text-inverse-on-surface dark:text-white font-label-md text-label-md shadow-md backdrop-blur-sm pointer-events-none">
-          匯入新行程
+          AI 行程助手
         </div>
         <button
           type="button"
-          onClick={onOpenImport}
-          aria-label="匯入新行程"
+          onClick={() => setDayChatOpen(true)}
+          aria-label="開啟當天 AI 行程助手"
+          title="當天 AI 行程助手"
           className="w-14 h-14 rounded-full bg-primary-container text-on-primary flex items-center justify-center shadow-lg hover:shadow-xl active:scale-95 transition-all duration-200"
         >
-          <span className="material-symbols-outlined text-[28px]">add</span>
+          <span className="material-symbols-outlined text-[26px]">auto_awesome</span>
         </button>
       </aside>
+
+      <DayChatSheet
+        isOpen={dayChatOpen}
+        tripId={trip.id}
+        tripTitle={trip.title}
+        day={currentDay ?? null}
+        onClose={() => setDayChatOpen(false)}
+      />
     </div>
   );
 };

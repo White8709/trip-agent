@@ -37,6 +37,11 @@ async fn main() {
         .with(tracing_subscriber::fmt::layer())
         .init();
 
+    let host: std::net::IpAddr = std::env::var("HOST")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or_else(|| std::net::IpAddr::from([127, 0, 0, 1]));
+
     let port: u16 = std::env::var("PORT")
         .ok()
         .and_then(|v| v.parse().ok())
@@ -82,6 +87,10 @@ async fn main() {
         .route("/api/trips/import", post(trips::import_trip))
         .route("/api/trips/latest", get(trips::get_latest_trip))
         .route(
+            "/api/trips/{trip_id}/days/{day_number}/chat",
+            post(guides::chat_day),
+        )
+        .route(
             "/api/items/{item_id}/guide",
             get(guides::get_guide).post(guides::generate_guide),
         )
@@ -89,6 +98,7 @@ async fn main() {
             "/api/items/{item_id}/guide/audio",
             post(guides::generate_guide_audio),
         )
+        .route("/api/items/{item_id}/chat", post(guides::chat_item))
         .route("/api/audio/{guide_id}", get(guides::serve_audio));
 
     let mut app = api_router
@@ -96,7 +106,9 @@ async fn main() {
         .layer(CorsLayer::permissive())
         .layer(TraceLayer::new_for_http());
 
-    let dist_dir = PathBuf::from("../frontend/dist");
+    let dist_dir = PathBuf::from(
+        std::env::var("STATIC_DIR").unwrap_or_else(|_| "../frontend/dist".to_string()),
+    );
     if dist_dir.exists() {
         tracing::info!(?dist_dir, "Serving static frontend build");
         let index_file = dist_dir.join("index.html");
@@ -104,7 +116,7 @@ async fn main() {
         app = app.fallback_service(serve_dir);
     }
 
-    let addr = SocketAddr::from(([127, 0, 0, 1], port));
+    let addr = SocketAddr::from((host, port));
     tracing::info!("Listening on http://{addr}");
     let listener = tokio::net::TcpListener::bind(addr)
         .await

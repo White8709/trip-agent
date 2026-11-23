@@ -5,6 +5,7 @@ interface DeviceModalProps {
   isOpen: boolean;
   profile: DeviceProfile | null;
   onClose: () => void;
+  onOpenImport: () => void;
   onUpdateName: (name: string) => Promise<void>;
   onBindCode: (code: string) => Promise<void>;
 }
@@ -13,6 +14,7 @@ export const DeviceModal: React.FC<DeviceModalProps> = ({
   isOpen,
   profile,
   onClose,
+  onOpenImport,
   onUpdateName,
   onBindCode,
 }) => {
@@ -148,6 +150,26 @@ export const DeviceModal: React.FC<DeviceModalProps> = ({
             <span>{feedback.text}</span>
           </div>
         )}
+
+        {/* Itinerary Actions */}
+        <div className="flex flex-col gap-2">
+          <span className="text-label-md font-label-md text-on-surface dark:text-slate-200">
+            行程管理
+          </span>
+          <button
+            type="button"
+            onClick={onOpenImport}
+            className="w-full h-11 px-4 rounded-xl bg-primary-fixed/50 dark:bg-primary/20 hover:bg-primary-fixed dark:hover:bg-primary/30 text-primary dark:text-[#ff9c85] font-label-md text-label-md flex items-center justify-between transition-colors active:scale-[0.99]"
+          >
+            <span className="inline-flex items-center gap-2">
+              <span className="material-symbols-outlined text-[20px]">add_circle</span>
+              <span>匯入新行程</span>
+            </span>
+            <span className="material-symbols-outlined text-[18px]">arrow_forward</span>
+          </button>
+        </div>
+
+        <div className="border-t border-surface-container-high/70 dark:border-white/[0.08]" />
 
         {/* Current Binding Code Card */}
         <div className="rounded-xl bg-surface-container-low dark:bg-[#14181F] p-3.5 border border-transparent dark:border-white/[0.06] flex flex-col gap-2">

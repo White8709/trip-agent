@@ -12,7 +12,9 @@ use uuid::Uuid;
 use crate::{
     db::AppState,
     error::AppError,
-    models::{AudioResponse, GuideEnvelope, GuideResponse, GuideStyle},
+    models::{
+        AudioResponse, ChatRequest, ChatResponse, GuideEnvelope, GuideResponse, GuideStyle,
+    },
     routes::auth::DeviceAuth,
 };
 
@@ -303,4 +305,124 @@ pub async fn serve_audio(
         ],
         bytes,
     ))
+}
+
+fn format_stay_for_prompt(duration_minutes: i64) -> String {
+    if duration_minutes == 0 {
+        "路過 / 備案（停留 0 分鐘）".to_string()
+    } else {
+        format!("預計停留 {} 分鐘", duration_minutes)
+    }
+}
+
+pub async fn chat_day(
+    auth: DeviceAuth,
+    State(state): State<AppState>,
+    Path((trip_id, day_number)): Path<(String, i64)>,
+    Json(req): Json<ChatRequest>,
+) -> Result<Json<ChatResponse>, AppError> {
+    let day_row = sqlx::query(
+        "SELECT t.title AS trip_title, d.id AS day_id, d.date \
+         FROM trip_days d \
+         JOIN trips t ON d.trip_id = t.id \
+         WHERE t.id = ? AND d.day_number = ? AND t.device_id = ?",
+    )
+    .bind(&trip_id)
+    .bind(day_number)
+    .bind(&auth.device_id)
+    .fetch_optional(&state.pool)
+    .await?
+    .ok_or_else(|| AppError::NotFound("找不到該天的行程資料或無權存取。".to_string()))?;
+
+    let trip_title: String = day_row.get("trip_title");
+    let day_id: i64 = day_row.get("day_id");
+    let date: String = day_row.get("date");
+
+    let item_rows = sqlx::query(
+        "SELECT sequence, start_time, name, duration_minutes \
+         FROM trip_items \
+         WHERE day_id = ? \
+         ORDER BY sequence ASC",
+    )
+    .bind(day_id)
+    .fetch_all(&state.pool)
+    .await?;
+
+    let mut schedule_lines = Vec::with_capacity(item_rows.len());
+    for row in item_rows {
+        let seq: i64 = row.get("sequence");
+        let start_time: String = row.get("start_time");
+        let name: String = row.get("name");
+        let duration_minutes: i64 = row.get("duration_minutes");
+        schedule_lines.push(format!(
+            "#{seq} {start_time} {name}（{}）",
+            format_stay_for_prompt(duration_minutes)
+        ));
+    }
+
+    let system_instruction = format!(
+        "你是一位貼心且熟悉當地旅遊的繁體中文（台灣用語）AI 行程助手。\n\
+        請完全根據旅客「當天」的真實行程資料回答問題，包含路線順暢度、交通與時間分配、附近美食或伴手禮、拍照與備案建議。\n\
+        回答請精簡好讀（適合手機螢幕閱讀），請用純文字搭配換行或「•」「1.」條列排版，切勿使用 Markdown 語法（如 **粗體**、### 標題）或 LaTeX 數學符號，也不要捏造行程表中不存在的預訂時間。\n\n\
+        【行程主題】{trip_title}\n\
+        【日期】第 {day_number} 天（{date}）\n\
+        【當日行程表（依順序排列）】\n{}",
+        schedule_lines.join("\n")
+    );
+
+    let reply = state.gemini.chat(&system_instruction, &req.messages).await?;
+    Ok(Json(ChatResponse { reply }))
+}
+
+pub async fn chat_item(
+    auth: DeviceAuth,
+    State(state): State<AppState>,
+    Path(item_id): Path<i64>,
+    Json(req): Json<ChatRequest>,
+) -> Result<Json<ChatResponse>, AppError> {
+    let item_row = sqlx::query(
+        "SELECT t.title AS trip_title, d.day_number, d.date, i.start_time, i.name AS item_name, i.duration_minutes \
+         FROM trip_items i \
+         JOIN trip_days d ON i.day_id = d.id \
+         JOIN trips t ON d.trip_id = t.id \
+         WHERE i.id = ? AND t.device_id = ?",
+    )
+    .bind(item_id)
+    .bind(&auth.device_id)
+    .fetch_optional(&state.pool)
+    .await?
+    .ok_or_else(|| AppError::NotFound("找不到該行程景點或無權存取。".to_string()))?;
+
+    let trip_title: String = item_row.get("trip_title");
+    let day_number: i64 = item_row.get("day_number");
+    let date: String = item_row.get("date");
+    let start_time: String = item_row.get("start_time");
+    let item_name: String = item_row.get("item_name");
+    let duration_minutes: i64 = item_row.get("duration_minutes");
+
+    let cached_story: Option<String> = sqlx::query(
+        "SELECT story FROM ai_guides WHERE item_id = ? ORDER BY updated_at DESC LIMIT 1",
+    )
+    .bind(item_id)
+    .fetch_optional(&state.pool)
+    .await?
+    .map(|r| r.get("story"));
+
+    let mut system_instruction = format!(
+        "你是一位親切專業的繁體中文（台灣用語）私人旅遊導覽員。\n\
+        旅客目前正在查看行程中的單一景點，請針對這個景點回答他的問題（例如必看亮點、必吃美食、停留時間安排、排隊技巧、親子或雨天備案等）。\n\
+        回答請簡潔自然、適合手機畫面閱讀；請使用純文字與換行或「•」「1.」條列，切勿使用 Markdown 語法（如 **粗體**、### 標題）或 LaTeX 數學符號。\n\n\
+        【行程主題】{trip_title}\n\
+        【日期與時段】第 {day_number} 天（{date}）{start_time}\n\
+        【景點 / 活動名稱】{item_name}\n\
+        【停留安排】{}",
+        format_stay_for_prompt(duration_minutes)
+    );
+
+    if let Some(story) = cached_story {
+        system_instruction.push_str(&format!("\n【景點背景摘要】{story}"));
+    }
+
+    let reply = state.gemini.chat(&system_instruction, &req.messages).await?;
+    Ok(Json(ChatResponse { reply }))
 }

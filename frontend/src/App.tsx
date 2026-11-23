@@ -140,7 +140,6 @@ export function App() {
           onToggleTheme={toggleTheme}
           onOpenDeviceModal={() => setDeviceModalOpen(true)}
           onSelectGuide={(item) => setSelectedItem(item)}
-          onOpenImport={() => setView('import')}
         />
       ) : (
         <ImportPage
@@ -163,6 +162,10 @@ export function App() {
         isOpen={deviceModalOpen}
         profile={profile}
         onClose={() => setDeviceModalOpen(false)}
+        onOpenImport={() => {
+          setDeviceModalOpen(false);
+          setView('import');
+        }}
         onUpdateName={handleUpdateDeviceName}
         onBindCode={handleBindCode}
       />

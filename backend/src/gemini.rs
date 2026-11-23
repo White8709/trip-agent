@@ -5,7 +5,10 @@ use serde_json::{json, Value};
 use std::time::Duration;
 use tokio_tungstenite::{connect_async, tungstenite::Message};
 
-use crate::{error::AppError, models::GuideStyle};
+use crate::{
+    error::AppError,
+    models::{ChatMessage, GuideStyle},
+};
 
 #[derive(Debug, Clone)]
 pub struct GeminiConfig {
@@ -149,6 +152,98 @@ impl GeminiClient {
         serde_json::from_str::<GeneratedGuide>(cleaned).map_err(|e| {
             AppError::Upstream(format!("Gemini 回傳的 JSON 格式不符預期：{e}"))
         })
+    }
+
+    pub async fn chat(
+        &self,
+        system_instruction: &str,
+        messages: &[ChatMessage],
+    ) -> Result<String, AppError> {
+        let api_key = self.ensure_api_key()?;
+        let valid_messages: Vec<&ChatMessage> = messages
+            .iter()
+            .filter(|m| !m.content.trim().is_empty())
+            .collect();
+
+        if valid_messages.is_empty() {
+            return Err(AppError::BadRequest("請輸入想詢問的內容。".to_string()));
+        }
+
+        let contents: Vec<Value> = valid_messages
+            .into_iter()
+            .map(|m| {
+                let role = if m.role.eq_ignore_ascii_case("model") {
+                    "model"
+                } else {
+                    "user"
+                };
+                json!({
+                    "role": role,
+                    "parts": [{ "text": m.content.trim() }]
+                })
+            })
+            .collect();
+
+        let url = format!(
+            "https://generativelanguage.googleapis.com/v1beta/models/{}:generateContent?key={}",
+            self.config.text_model, api_key
+        );
+
+        let body = json!({
+            "systemInstruction": {
+                "parts": [{ "text": system_instruction }]
+            },
+            "contents": contents,
+            "generationConfig": {
+                "temperature": 0.7
+            }
+        });
+
+        let res = self
+            .http
+            .post(&url)
+            .json(&body)
+            .send()
+            .await
+            .map_err(|e| AppError::Upstream(format!("無法連線至 Gemini Chat API：{e}")))?;
+
+        let status = res.status();
+        let payload: Value = res
+            .json()
+            .await
+            .map_err(|e| AppError::Upstream(format!("解析 Gemini 對話回應失敗：{e}")))?;
+
+        if !status.is_success() {
+            let msg = payload
+                .pointer("/error/message")
+                .and_then(|v| v.as_str())
+                .unwrap_or("未知錯誤");
+            return Err(AppError::Upstream(format!(
+                "Gemini Chat API 回傳錯誤 ({status})：{msg}"
+            )));
+        }
+
+        let parts = payload
+            .pointer("/candidates/0/content/parts")
+            .and_then(|v| v.as_array())
+            .ok_or_else(|| {
+                AppError::Upstream("Gemini Chat API 回應中找不到回覆內容。".to_string())
+            })?;
+
+        let reply: String = parts
+            .iter()
+            .filter_map(|p| p.get("text").and_then(|v| v.as_str()))
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        let trimmed = reply.trim();
+        if trimmed.is_empty() {
+            return Err(AppError::Upstream(
+                "Gemini Chat API 回傳空白回覆，請稍後再試。".to_string(),
+            ));
+        }
+
+        Ok(trimmed.to_string())
     }
 
     pub async fn generate_tts_wav(&self, narration_script: &str) -> Result<Vec<u8>, AppError> {

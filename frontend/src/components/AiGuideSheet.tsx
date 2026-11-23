@@ -1,5 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import {
+  ChatMessage,
+  chatWithItem,
   generateGuide,
   generateGuideAudio,
   getGuide,
@@ -8,6 +10,7 @@ import {
   TripItem,
 } from '../lib/api';
 import { formatStayDuration } from '../lib/parser';
+import { ChatPanel } from './ChatPanel';
 
 interface AiGuideSheetProps {
   item: TripItem | null;
@@ -23,6 +26,14 @@ const STYLE_OPTIONS: { id: GuideStyle; label: string; icon: string }[] = [
 
 const PLAYBACK_RATES = [1, 1.25, 1.5] as const;
 
+const ITEM_STARTER_PROMPTS = [
+  '這裡最推薦的必看或必拍亮點是什麼？',
+  '附近有推薦的美食或伴手禮嗎？',
+  '預計停留時間夠逛嗎？怎麼逛最順？',
+];
+
+type SheetTab = 'guide' | 'chat';
+
 function formatAudioSeconds(sec: number): string {
   if (!Number.isFinite(sec) || sec < 0) return '00:00';
   const total = Math.floor(sec);
@@ -36,12 +47,18 @@ export const AiGuideSheet: React.FC<AiGuideSheetProps> = ({
   onClose,
   onStyleCached,
 }) => {
+  const [activeTab, setActiveTab] = useState<SheetTab>('guide');
   const [style, setStyle] = useState<GuideStyle>('cultural');
   const [guide, setGuide] = useState<Guide | null>(null);
   const [loadingText, setLoadingText] = useState(false);
   const [loadingAudio, setLoadingAudio] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [reloadNonce, setReloadNonce] = useState(0);
+
+  // Per-item AI chat state
+  const [chatByItem, setChatByItem] = useState<Record<number, ChatMessage[]>>({});
+  const [chatSending, setChatSending] = useState(false);
+  const [chatError, setChatError] = useState<string | null>(null);
 
   // Audio player state
   const audioRef = useRef<HTMLAudioElement | null>(null);
@@ -50,12 +67,14 @@ export const AiGuideSheet: React.FC<AiGuideSheetProps> = ({
   const [duration, setDuration] = useState(0);
   const [rateIndex, setRateIndex] = useState(0);
 
-  // Reset default style when opening a different item
+  // Reset default tab & style when opening a different item
   useEffect(() => {
     if (item) {
+      setActiveTab('guide');
       setStyle(item.cached_styles[0] ?? 'cultural');
       setGuide(null);
       setError(null);
+      setChatError(null);
     }
   }, [item?.item_id]);
 
@@ -183,13 +202,50 @@ export const AiGuideSheet: React.FC<AiGuideSheetProps> = ({
     setRateIndex((prev) => (prev + 1) % PLAYBACK_RATES.length);
   };
 
+  const itemMessages = chatByItem[item.item_id] ?? [];
+
+  const handleSendChat = async (text: string) => {
+    if (chatSending) return;
+    const itemId = item.item_id;
+    const nextMessages = [...itemMessages, { role: 'user' as const, content: text }];
+
+    setChatByItem((prev) => ({
+      ...prev,
+      [itemId]: nextMessages,
+    }));
+    setChatSending(true);
+    setChatError(null);
+
+    try {
+      const reply = await chatWithItem(itemId, nextMessages);
+      setChatByItem((prev) => ({
+        ...prev,
+        [itemId]: [...(prev[itemId] ?? nextMessages), { role: 'model', content: reply }],
+      }));
+    } catch (err) {
+      setChatError(err instanceof Error ? err.message : 'AI 回覆失敗，請稍後再試。');
+    } finally {
+      setChatSending(false);
+    }
+  };
+
+  const handleClearChat = () => {
+    const itemId = item.item_id;
+    setChatByItem((prev) => {
+      const next = { ...prev };
+      delete next[itemId];
+      return next;
+    });
+    setChatError(null);
+  };
+
   return (
     <div
       className="fixed inset-0 z-50 flex items-end justify-center bg-[#1A202C]/35 backdrop-blur-sm"
       onClick={onClose}
     >
       <div
-        className="animate-sheet-up w-full max-w-[430px] max-h-[88dvh] bg-surface-container-lowest dark:bg-[#1A1D24] rounded-t-2xl shadow-2xl border-t border-transparent dark:border-white/[0.08] flex flex-col overflow-hidden pb-safe"
+        className="animate-sheet-up w-full max-w-[430px] h-[85dvh] bg-surface-container-lowest dark:bg-[#1A1D24] rounded-t-2xl shadow-2xl border-t border-transparent dark:border-white/[0.08] flex flex-col overflow-hidden pb-safe"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Drag Handle */}
@@ -214,18 +270,78 @@ export const AiGuideSheet: React.FC<AiGuideSheetProps> = ({
             </h2>
           </div>
 
-          <button
-            type="button"
-            onClick={onClose}
-            aria-label="關閉導覽視窗"
-            className="w-9 h-9 rounded-full flex items-center justify-center text-on-surface-variant dark:text-slate-400 hover:bg-surface-container dark:hover:bg-[#2A2D35] transition-colors shrink-0"
-          >
-            <span className="material-symbols-outlined text-[20px]">close</span>
-          </button>
+          <div className="flex items-center gap-1 shrink-0">
+            {activeTab === 'chat' && itemMessages.length > 0 && (
+              <button
+                type="button"
+                onClick={handleClearChat}
+                disabled={chatSending}
+                title="清除對話"
+                aria-label="清除對話"
+                className="w-9 h-9 rounded-full flex items-center justify-center text-on-surface-variant dark:text-slate-400 hover:bg-surface-container dark:hover:bg-[#2A2D35] transition-colors disabled:opacity-50"
+              >
+                <span className="material-symbols-outlined text-[19px]">delete_sweep</span>
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={onClose}
+              aria-label="關閉導覽視窗"
+              className="w-9 h-9 rounded-full flex items-center justify-center text-on-surface-variant dark:text-slate-400 hover:bg-surface-container dark:hover:bg-[#2A2D35] transition-colors"
+            >
+              <span className="material-symbols-outlined text-[20px]">close</span>
+            </button>
+          </div>
         </div>
 
-        {/* Style Switcher Pills */}
-        <div className="px-5 py-2.5 bg-surface-container-low/50 dark:bg-[#14171D] border-b border-surface-container-high/40 dark:border-white/[0.05] flex items-center gap-2 overflow-x-auto no-scrollbar shrink-0">
+        {/* Mode Tabs: 導覽內容 vs 景點 AI 對話 */}
+        <div className="px-5 py-2 bg-surface-container-low/70 dark:bg-[#14171D] border-b border-surface-container-high/40 dark:border-white/[0.06] shrink-0">
+          <div className="grid grid-cols-2 gap-1.5 p-1 rounded-xl bg-surface-container dark:bg-[#22252D]">
+            <button
+              type="button"
+              onClick={() => setActiveTab('guide')}
+              className={`h-8 rounded-lg text-label-md font-label-md inline-flex items-center justify-center gap-1.5 transition-all ${
+                activeTab === 'guide'
+                  ? 'bg-surface-container-lowest dark:bg-[#1A1D24] text-on-surface dark:text-white shadow-sm'
+                  : 'text-on-surface-variant dark:text-slate-400 hover:text-on-surface dark:hover:text-slate-200'
+              }`}
+            >
+              <span className="material-symbols-outlined text-[16px]">menu_book</span>
+              <span>導覽與語音</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setActiveTab('chat')}
+              className={`h-8 rounded-lg text-label-md font-label-md inline-flex items-center justify-center gap-1.5 transition-all ${
+                activeTab === 'chat'
+                  ? 'bg-surface-container-lowest dark:bg-[#1A1D24] text-primary dark:text-[#ff9c85] shadow-sm'
+                  : 'text-on-surface-variant dark:text-slate-400 hover:text-on-surface dark:hover:text-slate-200'
+              }`}
+            >
+              <span className="material-symbols-outlined text-[16px]">forum</span>
+              <span>景點 AI 對話</span>
+              {itemMessages.length > 0 && (
+                <span className="w-1.5 h-1.5 rounded-full bg-primary-container" />
+              )}
+            </button>
+          </div>
+        </div>
+
+        {activeTab === 'chat' ? (
+          <ChatPanel
+            messages={itemMessages}
+            sending={chatSending}
+            error={chatError}
+            emptyTitle={`想更了解「${item.name}」嗎？`}
+            emptySubtitle="可以直接針對這個景點發問：附近美食、拍照機位、停留時間建議或雨天備案。"
+            starterPrompts={ITEM_STARTER_PROMPTS}
+            placeholder={`針對 ${item.name} 提問...`}
+            onSend={(text) => void handleSendChat(text)}
+          />
+        ) : (
+          <>
+            {/* Style Switcher Pills */}
+            <div className="px-5 py-2.5 bg-surface-container-low/50 dark:bg-[#14171D] border-b border-surface-container-high/40 dark:border-white/[0.05] flex items-center gap-2 overflow-x-auto no-scrollbar shrink-0">
           {STYLE_OPTIONS.map((opt) => {
             const active = style === opt.id;
             const isCached = item.cached_styles.includes(opt.id);
@@ -465,6 +581,8 @@ export const AiGuideSheet: React.FC<AiGuideSheetProps> = ({
               </div>
             )}
           </div>
+        )}
+          </>
         )}
       </div>
     </div>

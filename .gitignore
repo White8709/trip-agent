@@ -1,6 +1,7 @@
 # Rust
 backend/target/
 backend/data/
+data/
 backend/.env
 
 # Frontend

@@ -108,3 +108,19 @@ pub struct GuideEnvelope {
 pub struct AudioResponse {
     pub audio_url: String,
 }
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct ChatMessage {
+    pub role: String,
+    pub content: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ChatRequest {
+    pub messages: Vec<ChatMessage>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct ChatResponse {
+    pub reply: String,
+}
