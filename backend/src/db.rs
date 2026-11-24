@@ -52,4 +52,21 @@ mod tests {
             .any(|row| row.get::<String, _>("name") == "sources_json");
         assert!(has_sources_json, "ai_guides should contain sources_json column");
     }
+
+    #[tokio::test]
+    async fn migrations_add_updated_at_column_to_trips() {
+        let pool = init_pool("sqlite::memory:")
+            .await
+            .expect("in-memory sqlite migrations should succeed");
+
+        let columns = sqlx::query("PRAGMA table_info(trips)")
+            .fetch_all(&pool)
+            .await
+            .expect("PRAGMA table_info should succeed");
+
+        let has_updated_at = columns
+            .iter()
+            .any(|row| row.get::<String, _>("name") == "updated_at");
+        assert!(has_updated_at, "trips should contain updated_at column");
+    }
 }

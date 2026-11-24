@@ -1,5 +1,5 @@
-import React, { useMemo, useRef, useState } from 'react';
-import { importTrip, Trip } from '../lib/api';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { importTrip, Trip, TripSummary, updateTrip, UpdateTripResult } from '../lib/api';
 import {
   formatStayDuration,
   formatTotalStay,
@@ -14,6 +14,9 @@ interface ImportPageProps {
   onOpenDeviceModal: () => void;
   onBack: () => void;
   onImported: (trip: Trip) => void;
+  existingTrips: TripSummary[];
+  updatingTrip?: Trip | null;
+  onUpdated?: (result: UpdateTripResult) => void;
 }
 
 export const ImportPage: React.FC<ImportPageProps> = ({
@@ -23,14 +26,44 @@ export const ImportPage: React.FC<ImportPageProps> = ({
   onOpenDeviceModal,
   onBack,
   onImported,
+  existingTrips,
+  updatingTrip = null,
+  onUpdated,
 }) => {
   const [rawText, setRawText] = useState('');
+  const [saveMode, setSaveMode] = useState<'overwrite' | 'new'>('overwrite');
+  const isUpdateMode = updatingTrip !== null;
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [clipboardNotice, setClipboardNotice] = useState<string | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
 
   const parseResult = useMemo(() => parseChicTripPreview(rawText), [rawText]);
+  const duplicateTrip = useMemo(() => {
+    if (isUpdateMode || !parseResult.ok) return null;
+    const title = parseResult.data.title.trim();
+    return existingTrips.find((t) => t.title.trim() === title) ?? null;
+  }, [isUpdateMode, parseResult, existingTrips]);
+  const duplicateId = duplicateTrip?.id ?? null;
+
+  // Reset the form cleanly whenever the target mode/trip changes.
+  useEffect(() => {
+    setRawText('');
+    setSubmitError(null);
+    setClipboardNotice(null);
+  }, [updatingTrip?.id]);
+
+  // Default to overwrite whenever a (new) duplicate is detected.
+  useEffect(() => {
+    if (duplicateId) setSaveMode('overwrite');
+  }, [duplicateId]);
+
+  const overwriteTarget = isUpdateMode
+    ? { id: updatingTrip.id, title: updatingTrip.title }
+    : duplicateTrip && saveMode === 'overwrite'
+      ? { id: duplicateTrip.id, title: duplicateTrip.title }
+      : null;
+
   const charCount = rawText.length;
   const lineCount = rawText.trim() ? rawText.split(/\r?\n/).length : 0;
 
@@ -59,6 +92,13 @@ export const ImportPage: React.FC<ImportPageProps> = ({
     setRawText(SAMPLE_CHICTRIP_TEXT);
   };
 
+  const handleFillCurrentText = () => {
+    if (!updatingTrip) return;
+    setSubmitError(null);
+    setClipboardNotice(null);
+    setRawText(updatingTrip.raw_text ?? '');
+  };
+
   const handleClear = () => {
     setSubmitError(null);
     setClipboardNotice(null);
@@ -71,10 +111,22 @@ export const ImportPage: React.FC<ImportPageProps> = ({
     setSubmitting(true);
     setSubmitError(null);
     try {
-      const trip = await importTrip(rawText);
-      onImported(trip);
+      if (overwriteTarget) {
+        const result = await updateTrip(overwriteTarget.id, rawText);
+        if (onUpdated) onUpdated(result);
+        else onImported(result.trip);
+      } else {
+        const trip = await importTrip(rawText);
+        onImported(trip);
+      }
     } catch (err) {
-      setSubmitError(err instanceof Error ? err.message : '匯入失敗，請檢查行程格式。');
+      setSubmitError(
+        err instanceof Error
+          ? err.message
+          : overwriteTarget
+            ? '更新失敗，請檢查行程格式。'
+            : '匯入失敗，請檢查行程格式。',
+      );
     } finally {
       setSubmitting(false);
     }
@@ -92,7 +144,7 @@ export const ImportPage: React.FC<ImportPageProps> = ({
             <button
               type="button"
               onClick={onBack}
-              aria-label="返回行程時間軸"
+              aria-label={isUpdateMode ? '取消更新並返回' : '返回'}
               className="w-11 h-11 flex items-center justify-center rounded-full text-on-surface dark:text-[#E2E8F0] hover:bg-surface-container-high/60 dark:hover:bg-[#22262E] transition-colors active:scale-95"
             >
               <span className="material-symbols-outlined text-[20px]">arrow_back_ios_new</span>
@@ -104,7 +156,7 @@ export const ImportPage: React.FC<ImportPageProps> = ({
           )}
 
           <h1 className="text-headline-sm font-headline-sm text-on-surface dark:text-[#E2E8F0] tracking-tight text-center truncate max-w-[180px] sm:max-w-[320px] md:max-w-none">
-            匯入去趣行程
+            {isUpdateMode ? '更新去趣行程' : '匯入去趣行程'}
           </h1>
 
           <div className="flex items-center gap-1.5">
@@ -137,6 +189,22 @@ export const ImportPage: React.FC<ImportPageProps> = ({
         <div className="flex flex-col gap-4 lg:grid lg:grid-cols-12 lg:gap-gutter-desktop lg:items-start">
           {/* Left Column: Guidance & Input */}
           <div className="lg:col-span-7 flex flex-col gap-4">
+            {isUpdateMode && (
+              <div className="bg-primary-fixed/40 dark:bg-primary/15 rounded-xl p-4 sm:p-5 border border-primary/15 dark:border-primary/25 flex items-start gap-3">
+                <div className="w-8 h-8 rounded-full bg-primary-container/90 dark:bg-[#FF6B4A] text-on-primary flex items-center justify-center shrink-0 mt-0.5">
+                  <span className="material-symbols-outlined text-[18px]">edit_note</span>
+                </div>
+                <div className="flex flex-col gap-1 min-w-0">
+                  <p className="font-headline-sm text-body-md text-on-surface dark:text-[#F1F5F9] font-semibold tracking-tight break-words">
+                    正在更新「{updatingTrip.title}」
+                  </p>
+                  <p className="font-body-sm text-body-sm text-on-surface-variant dark:text-[#94A3B8] leading-relaxed">
+                    貼上新版去趣文字後送出，將覆蓋此行程內容；同名景點已生成的 AI 導覽與語音快取會自動保留。
+                  </p>
+                </div>
+              </div>
+            )}
+
             {/* Guidance Banner */}
             <div className="bg-surface-container-low dark:bg-[#1a202c]/70 rounded-xl p-4 sm:p-5 shadow-sm dark:shadow-none border border-transparent dark:border-[#2E3440] relative overflow-hidden transition-colors">
               <div className="absolute -right-4 -bottom-6 w-24 h-24 bg-secondary-container/20 dark:bg-secondary-container/10 rounded-full blur-xl pointer-events-none" />
@@ -158,6 +226,7 @@ export const ImportPage: React.FC<ImportPageProps> = ({
             {/* Notebook Input Card */}
             <div className="bg-surface-container-lowest dark:bg-[#1c2128] rounded-xl p-4 sm:p-5 shadow-sm dark:shadow-none border border-transparent dark:border-[#2E3440] flex flex-col gap-3 relative transition-all">
               <div className="flex flex-wrap items-center justify-between gap-2 pb-1">
+                <div className="flex flex-wrap items-center gap-1.5">
                 <button
                   type="button"
                   onClick={handlePaste}
@@ -166,6 +235,17 @@ export const ImportPage: React.FC<ImportPageProps> = ({
                   <span className="material-symbols-outlined text-[16px]">content_paste</span>
                   <span>貼上剪貼簿</span>
                 </button>
+                {isUpdateMode && (
+                  <button
+                    type="button"
+                    onClick={handleFillCurrentText}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-surface-container-low dark:bg-[#262c36] text-secondary dark:text-[#7db6ff] hover:bg-secondary-container/50 dark:hover:bg-[#343c4a] transition-colors active:scale-95 text-label-md font-label-md"
+                  >
+                    <span className="material-symbols-outlined text-[16px]">history_edu</span>
+                    <span>帶入目前文字</span>
+                  </button>
+                )}
+                </div>
                 <div className="flex items-center gap-1">
                   <button
                     type="button"
@@ -296,6 +376,46 @@ export const ImportPage: React.FC<ImportPageProps> = ({
               </div>
             )}
 
+            {duplicateTrip && (
+              <div
+                role="radiogroup"
+                aria-label="匯入方式"
+                className="bg-surface-container-lowest dark:bg-[#1c2128] rounded-xl p-3 sm:p-4 shadow-sm dark:shadow-none border border-transparent dark:border-[#2E3440] flex flex-col gap-2"
+              >
+                <p className="text-label-md font-label-md text-on-surface-variant dark:text-[#94A3B8] flex items-center gap-1.5">
+                  <span className="material-symbols-outlined text-[16px] text-secondary dark:text-[#7db6ff]">
+                    content_copy
+                  </span>
+                  已有同名行程，請選擇處理方式
+                </p>
+                {([
+                  ['overwrite', `覆蓋更新既有「${duplicateTrip.title}」（保留同名景點導覽快取）`],
+                  ['new', '另存為新行程'],
+                ] as const).map(([value, label]) => {
+                  const active = saveMode === value;
+                  return (
+                    <button
+                      key={value}
+                      type="button"
+                      role="radio"
+                      aria-checked={active}
+                      onClick={() => setSaveMode(value)}
+                      className={`w-full text-left px-3 py-2.5 rounded-lg flex items-start gap-2.5 text-body-sm font-body-sm transition-colors border ${
+                        active
+                          ? 'bg-primary-fixed/50 dark:bg-primary/20 border-primary/30 text-on-surface dark:text-[#F1F5F9]'
+                          : 'bg-surface-container-low/60 dark:bg-[#14181f] border-transparent dark:border-[#2a303c] text-on-surface-variant dark:text-[#94A3B8] hover:bg-surface-container-low dark:hover:bg-[#1a202c]'
+                      }`}
+                    >
+                      <span className="material-symbols-outlined text-[18px] shrink-0 mt-px text-primary dark:text-[#FF8469]">
+                        {active ? 'radio_button_checked' : 'radio_button_unchecked'}
+                      </span>
+                      <span className="break-words min-w-0">{label}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+
             {/* Dynamic Day 1 Timeline Snapshot */}
             {firstDay && previewItems.length > 0 && (
               <div className="bg-surface-container-lowest dark:bg-[#1c2128] rounded-xl p-4 sm:p-5 shadow-sm dark:shadow-none border border-transparent dark:border-[#2E3440] flex flex-col gap-3 transition-colors">
@@ -411,11 +531,13 @@ export const ImportPage: React.FC<ImportPageProps> = ({
                 <span className="material-symbols-outlined text-[18px] animate-spin">
                   progress_activity
                 </span>
-                <span>正在建立行程時間軸...</span>
+                <span>{overwriteTarget ? '正在更新行程...' : '正在建立行程時間軸...'}</span>
               </>
             ) : (
               <>
-                <span>建立行程時間軸</span>
+                <span>
+                  {isUpdateMode ? '更新行程' : overwriteTarget ? '覆蓋更新既有行程' : '建立行程時間軸'}
+                </span>
                 <span className="material-symbols-outlined text-[18px]">arrow_forward</span>
               </>
             )}

@@ -1,6 +1,6 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { DayChatSheet } from '../components/DayChatSheet';
-import { Trip, TripItem } from '../lib/api';
+import { Trip, TripItem, TripSummary } from '../lib/api';
 import {
   formatDateWithWeekday,
   formatShortMonthDay,
@@ -10,6 +10,11 @@ import {
 
 interface TimelinePageProps {
   trip: Trip;
+  trips: TripSummary[];
+  switchingTrip?: boolean;
+  onOpenTripList: () => void;
+  onSwitchTrip: (tripId: string) => void;
+  onOpenImportNew: () => void;
   isDark: boolean;
   webSearchAvailable: boolean;
   activeGuideItemId?: number | null;
@@ -21,6 +26,11 @@ interface TimelinePageProps {
 
 export const TimelinePage: React.FC<TimelinePageProps> = ({
   trip,
+  trips,
+  switchingTrip = false,
+  onOpenTripList,
+  onSwitchTrip,
+  onOpenImportNew,
   isDark,
   webSearchAvailable,
   activeGuideItemId = null,
@@ -33,6 +43,33 @@ export const TimelinePage: React.FC<TimelinePageProps> = ({
     trip.days[0]?.day_number ?? 1,
   );
   const [dayChatOpen, setDayChatOpen] = useState(false);
+  const [switcherOpen, setSwitcherOpen] = useState(false);
+  const switcherRef = useRef<HTMLDivElement | null>(null);
+  const canSwitch = trips.length > 1;
+
+  useEffect(() => {
+    setSwitcherOpen(false);
+  }, [trip.id]);
+
+  useEffect(() => {
+    if (!switcherOpen) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setSwitcherOpen(false);
+    };
+    const onPointerDown = (e: MouseEvent | TouchEvent) => {
+      if (switcherRef.current && !switcherRef.current.contains(e.target as Node)) {
+        setSwitcherOpen(false);
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    document.addEventListener('mousedown', onPointerDown);
+    document.addEventListener('touchstart', onPointerDown);
+    return () => {
+      window.removeEventListener('keydown', onKeyDown);
+      document.removeEventListener('mousedown', onPointerDown);
+      document.removeEventListener('touchstart', onPointerDown);
+    };
+  }, [switcherOpen]);
 
   useEffect(() => {
     setSelectedDayNumber(trip.days[0]?.day_number ?? 1);
@@ -52,16 +89,119 @@ export const TimelinePage: React.FC<TimelinePageProps> = ({
       {/* Fixed Header */}
       <header className="fixed top-0 inset-x-0 z-40 pt-safe bg-surface/85 dark:bg-[#121316]/85 backdrop-blur-xl shadow-[0_1px_8px_rgba(0,0,0,0.04)] dark:shadow-[0_1px_8px_rgba(0,0,0,0.4)] dark:border-b dark:border-white/[0.08] transition-colors duration-200">
         <div className="h-16 px-margin md:px-margin-desktop max-w-[720px] lg:max-w-[1140px] xl:max-w-[1440px] mx-auto w-full flex items-center justify-between gap-2 lg:gap-4">
-          <div className="w-9 h-9 rounded-full bg-primary-fixed/60 dark:bg-primary/20 flex items-center justify-center shrink-0">
-            <span className="material-symbols-outlined text-primary dark:text-[#ff9c85] text-[20px]">
-              auto_stories
+          <button
+            type="button"
+            onClick={onOpenTripList}
+            aria-label="回到我的行程"
+            title="我的行程"
+            className="w-9 h-9 rounded-full bg-primary-fixed/60 dark:bg-primary/20 hover:bg-primary-fixed dark:hover:bg-primary/30 flex items-center justify-center shrink-0 active:scale-95 transition-all"
+          >
+            <span className="material-symbols-outlined text-primary dark:text-[#ff9c85] text-[18px]">
+              arrow_back_ios_new
             </span>
-          </div>
+          </button>
 
           <div className="flex-1 min-w-0 flex justify-center lg:justify-start items-center gap-2.5 px-1">
-            <h1 className="font-headline-md text-headline-md text-on-surface dark:text-white tracking-tight truncate select-none">
-              {trip.title}
-            </h1>
+            <div ref={switcherRef} className="relative min-w-0">
+              {canSwitch ? (
+                <button
+                  type="button"
+                  onClick={() => setSwitcherOpen((v) => !v)}
+                  aria-haspopup="listbox"
+                  aria-expanded={switcherOpen}
+                  aria-label="切換行程"
+                  title="切換行程"
+                  className="max-w-full inline-flex items-center gap-1 rounded-lg px-1.5 -mx-1.5 py-1 hover:bg-surface-container-low dark:hover:bg-[#24272E] active:scale-[0.99] transition-colors"
+                >
+                  <h1 className="font-headline-md text-headline-md text-on-surface dark:text-white tracking-tight truncate select-none">
+                    {trip.title}
+                  </h1>
+                  <span
+                    className={`material-symbols-outlined text-[20px] text-on-surface-variant dark:text-slate-400 shrink-0 transition-transform ${
+                      switcherOpen ? 'rotate-180' : ''
+                    }`}
+                  >
+                    expand_more
+                  </span>
+                </button>
+              ) : (
+                <h1 className="font-headline-md text-headline-md text-on-surface dark:text-white tracking-tight truncate select-none">
+                  {trip.title}
+                </h1>
+              )}
+
+              {canSwitch && switcherOpen && (
+                <div
+                  role="listbox"
+                  className="absolute left-1/2 -translate-x-1/2 lg:left-0 lg:translate-x-0 top-full mt-2 w-[min(320px,calc(100vw-32px))] max-h-[60vh] overflow-y-auto rounded-2xl bg-surface-container-lowest dark:bg-[#1c1f26] shadow-xl border border-surface-container-high/60 dark:border-white/[0.1] p-1.5 z-50 flex flex-col gap-0.5"
+                >
+                  {trips.map((t) => {
+                    const isCurrent = t.id === trip.id;
+                    return (
+                      <button
+                        key={t.id}
+                        type="button"
+                        role="option"
+                        aria-selected={isCurrent}
+                        disabled={switchingTrip}
+                        onClick={() => {
+                          setSwitcherOpen(false);
+                          if (!isCurrent) onSwitchTrip(t.id);
+                        }}
+                        className={`w-full text-left px-3 py-2 rounded-xl flex items-center gap-2 transition-colors disabled:opacity-60 ${
+                          isCurrent
+                            ? 'bg-primary-fixed/50 dark:bg-primary/20 text-primary dark:text-[#ff9c85]'
+                            : 'text-on-surface dark:text-slate-200 hover:bg-surface-container-low dark:hover:bg-[#24272E]'
+                        }`}
+                      >
+                        <span className="flex-1 min-w-0 flex flex-col">
+                          <span className="text-body-sm font-body-sm font-semibold truncate">
+                            {t.title}
+                          </span>
+                          <span className="text-label-sm font-label-sm text-on-surface-variant dark:text-slate-400 truncate tabular-nums">
+                            {t.start_date
+                              ? t.start_date === t.end_date || !t.end_date
+                                ? t.start_date
+                                : `${t.start_date} ~ ${t.end_date}`
+                              : `${t.day_count} 天 ・ ${t.item_count} 個景點`}
+                          </span>
+                        </span>
+                        {isCurrent && (
+                          <span className="material-symbols-outlined text-[18px] shrink-0">check</span>
+                        )}
+                      </button>
+                    );
+                  })}
+                  <div className="border-t border-surface-container-high/60 dark:border-white/[0.08] my-1" />
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSwitcherOpen(false);
+                      onOpenTripList();
+                    }}
+                    className="w-full text-left px-3 py-2 rounded-xl flex items-center gap-2 text-body-sm font-body-sm text-on-surface dark:text-slate-200 hover:bg-surface-container-low dark:hover:bg-[#24272E] transition-colors"
+                  >
+                    <span className="material-symbols-outlined text-[18px] text-secondary dark:text-sky-400">
+                      luggage
+                    </span>
+                    <span>查看全部行程</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSwitcherOpen(false);
+                      onOpenImportNew();
+                    }}
+                    className="w-full text-left px-3 py-2 rounded-xl flex items-center gap-2 text-body-sm font-body-sm text-on-surface dark:text-slate-200 hover:bg-surface-container-low dark:hover:bg-[#24272E] transition-colors"
+                  >
+                    <span className="material-symbols-outlined text-[18px] text-primary dark:text-[#ff9c85]">
+                      add_circle
+                    </span>
+                    <span>匯入新行程</span>
+                  </button>
+                </div>
+              )}
+            </div>
             <span className="hidden md:inline-flex items-center px-2.5 py-0.5 rounded-full bg-surface-container-low dark:bg-[#24272E] text-label-sm font-label-sm text-on-surface-variant dark:text-slate-300 shrink-0 tabular-nums">
               共 {trip.days.length} 天 ・ {totalStops} 個景點
             </span>

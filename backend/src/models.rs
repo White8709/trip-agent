@@ -77,13 +77,46 @@ pub struct TripResponse {
     pub id: String,
     pub title: String,
     pub share_url: Option<String>,
+    pub raw_text: String,
     pub created_at: String,
+    pub updated_at: String,
     pub days: Vec<TripDayResponse>,
 }
 
 #[derive(Debug, Serialize)]
 pub struct LatestTripEnvelope {
     pub trip: Option<TripResponse>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct TripSummaryResponse {
+    pub id: String,
+    pub title: String,
+    pub share_url: Option<String>,
+    pub start_date: Option<String>,
+    pub end_date: Option<String>,
+    pub day_count: i64,
+    pub item_count: i64,
+    pub total_duration_minutes: i64,
+    pub cached_guide_item_count: i64,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct TripListEnvelope {
+    pub trips: Vec<TripSummaryResponse>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct TripEnvelope {
+    pub trip: TripResponse,
+}
+
+#[derive(Debug, Serialize)]
+pub struct UpdateTripResponse {
+    pub trip: TripResponse,
+    pub preserved_guides: usize,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]

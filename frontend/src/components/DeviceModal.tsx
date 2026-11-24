@@ -10,6 +10,10 @@ interface DeviceModalProps {
   onChangeFontSize: (size: FontSizePreset) => void;
   onClose: () => void;
   onOpenImport: () => void;
+  tripCount: number;
+  canUpdateCurrentTrip?: boolean;
+  onOpenTripList: () => void;
+  onUpdateCurrentTrip?: () => void;
   onUpdateName: (name: string) => Promise<void>;
   onBindCode: (code: string) => Promise<void>;
 }
@@ -21,6 +25,10 @@ export const DeviceModal: React.FC<DeviceModalProps> = ({
   onChangeFontSize,
   onClose,
   onOpenImport,
+  tripCount,
+  canUpdateCurrentTrip,
+  onOpenTripList,
+  onUpdateCurrentTrip,
   onUpdateName,
   onBindCode,
 }) => {
@@ -164,6 +172,21 @@ export const DeviceModal: React.FC<DeviceModalProps> = ({
           <span className="text-label-md font-label-md text-on-surface dark:text-slate-200">
             行程管理
           </span>
+          {tripCount > 0 && (
+            <button
+              type="button"
+              onClick={onOpenTripList}
+              className="w-full h-11 px-4 rounded-xl bg-surface-container-low dark:bg-white/[0.06] hover:bg-surface-container dark:hover:bg-white/[0.1] text-on-surface dark:text-slate-200 font-label-md text-label-md flex items-center justify-between transition-colors active:scale-[0.99]"
+            >
+              <span className="inline-flex items-center gap-2 min-w-0">
+                <span className="material-symbols-outlined text-[20px] text-primary dark:text-[#ff9c85]">
+                  luggage
+                </span>
+                <span className="truncate">我的所有行程（共 {tripCount} 筆）</span>
+              </span>
+              <span className="material-symbols-outlined text-[18px] shrink-0">arrow_forward</span>
+            </button>
+          )}
           <button
             type="button"
             onClick={onOpenImport}
@@ -175,6 +198,21 @@ export const DeviceModal: React.FC<DeviceModalProps> = ({
             </span>
             <span className="material-symbols-outlined text-[18px]">arrow_forward</span>
           </button>
+          {canUpdateCurrentTrip && onUpdateCurrentTrip && (
+            <button
+              type="button"
+              onClick={onUpdateCurrentTrip}
+              className="w-full h-11 px-4 rounded-xl bg-surface-container-low dark:bg-white/[0.06] hover:bg-surface-container dark:hover:bg-white/[0.1] text-on-surface dark:text-slate-200 font-label-md text-label-md flex items-center justify-between transition-colors active:scale-[0.99]"
+            >
+              <span className="inline-flex items-center gap-2">
+                <span className="material-symbols-outlined text-[20px] text-secondary dark:text-[#7db6ff]">
+                  edit_note
+                </span>
+                <span>覆蓋更新目前行程</span>
+              </span>
+              <span className="material-symbols-outlined text-[18px]">arrow_forward</span>
+            </button>
+          )}
         </div>
 
         <div className="border-t border-surface-container-high/70 dark:border-white/[0.08]" />

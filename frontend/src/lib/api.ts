@@ -34,7 +34,28 @@ export interface Trip {
   title: string;
   share_url: string | null;
   created_at: string;
+  raw_text: string;
+  updated_at: string;
   days: TripDay[];
+}
+
+export interface TripSummary {
+  id: string;
+  title: string;
+  share_url: string | null;
+  start_date: string | null;
+  end_date: string | null;
+  day_count: number;
+  item_count: number;
+  total_duration_minutes: number;
+  cached_guide_item_count: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface UpdateTripResult {
+  trip: Trip;
+  preserved_guides: number;
 }
 
 export interface WebSource {
@@ -85,7 +106,17 @@ async function requestJson<T>(
     headers,
   });
 
-  const data = await res.json().catch(() => ({}));
+  let data: any = {};
+  if (res.status !== 204) {
+    const text = await res.text().catch(() => '');
+    if (text) {
+      try {
+        data = JSON.parse(text);
+      } catch {
+        data = {};
+      }
+    }
+  }
   if (!res.ok) {
     const msg =
       typeof data?.error === 'string' && data.error
@@ -167,6 +198,40 @@ export async function getLatestTrip(): Promise<Trip | null> {
     method: 'GET',
   });
   return res.trip;
+}
+
+export async function listTrips(): Promise<TripSummary[]> {
+  const res = await requestJson<{ trips: TripSummary[] }>('/api/trips', { method: 'GET' });
+  return res.trips ?? [];
+}
+
+export async function getTrip(tripId: string): Promise<Trip> {
+  const res = await requestJson<{ trip: Trip }>(`/api/trips/${encodeURIComponent(tripId)}`, {
+    method: 'GET',
+  });
+  return res.trip;
+}
+
+export async function updateTrip(tripId: string, rawText: string): Promise<UpdateTripResult> {
+  return requestJson<UpdateTripResult>(`/api/trips/${encodeURIComponent(tripId)}`, {
+    method: 'PUT',
+    body: JSON.stringify({ raw_text: rawText }),
+  });
+}
+
+export async function deleteTrip(tripId: string): Promise<void> {
+  await requestJson<unknown>(`/api/trips/${encodeURIComponent(tripId)}`, { method: 'DELETE' });
+}
+
+const LAST_TRIP_KEY = 'trip_agent_last_trip_id';
+
+export function getLastTripId(): string | null {
+  return localStorage.getItem(LAST_TRIP_KEY);
+}
+
+export function setLastTripId(tripId: string | null): void {
+  if (tripId) localStorage.setItem(LAST_TRIP_KEY, tripId);
+  else localStorage.removeItem(LAST_TRIP_KEY);
 }
 
 export async function getGuide(itemId: number, style: GuideStyle): Promise<Guide | null> {

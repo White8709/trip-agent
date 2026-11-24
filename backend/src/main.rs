@@ -114,8 +114,15 @@ async fn main() {
         .route("/api/devices/register", post(auth::register_device))
         .route("/api/devices/me", get(auth::get_me).patch(auth::update_me))
         .route("/api/devices/bind", post(auth::bind_device))
+        .route("/api/trips", get(trips::list_trips))
         .route("/api/trips/import", post(trips::import_trip))
         .route("/api/trips/latest", get(trips::get_latest_trip))
+        .route(
+            "/api/trips/{trip_id}",
+            get(trips::get_trip)
+                .put(trips::update_trip)
+                .delete(trips::delete_trip),
+        )
         .route(
             "/api/trips/{trip_id}/days/{day_number}/chat",
             post(guides::chat_day),
