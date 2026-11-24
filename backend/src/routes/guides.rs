@@ -16,6 +16,7 @@ use uuid::Uuid;
 use crate::{
     db::AppState,
     error::AppError,
+    gemini::TRADITIONAL_CHINESE_SYSTEM_RULE,
     models::{
         AudioResponse, ChatRequest, ChatResponse, GuideEnvelope, GuideResponse, GuideStyle,
         WebSource,
@@ -489,10 +490,61 @@ fn format_stay_for_prompt(duration_minutes: i64) -> String {
 
 fn web_search_prompt_instruction(enabled: bool) -> &'static str {
     if enabled {
-        "\n若要確認最新營業時間、門票價格、公休日、天氣預報、餐廳推薦或讀取旅客提供的特定網址，請主動使用 web_search 或 fetch_webpage 網路搜尋工具查詢最新資訊後再回答，勿捏造網址或未經查證的即時資訊。\n當你引用網路搜尋查到的官網、購票頁、餐廳或攻略文章時，請務必使用 [來源名稱](真實網址) 格式附上可點擊超連結（僅限工具實際回傳的網址，切勿自行編造 URL）；其餘文字仍維持純文字排版，不要使用 **粗體**、### 標題或 LaTeX。"
+        "\n若要確認最新營業時間、門票價格、公休日、天氣預報、餐廳推薦或讀取旅客提供的特定網址，請主動使用 web_search 或 fetch_webpage 網路搜尋工具查詢最新資訊後再回答，勿捏造網址或未經查證的即時資訊。\n即使搜尋到的網頁或原始資料為簡體中文、英文或日文，也必須翻譯並整理為繁體中文（台灣用語）作答，且 [來源名稱](真實網址) 中的來源名稱也請優先以繁體中文標示，絕不可直接使用簡體字或外文整段回覆。\n當你引用網路搜尋查到的官網、購票頁、餐廳或攻略文章時，請務必使用 [來源名稱](真實網址) 格式附上可點擊超連結（僅限工具實際回傳的網址，切勿自行編造 URL）；其餘文字仍維持純文字排版，不要使用 **粗體**、### 標題或 LaTeX。"
     } else {
         ""
     }
+}
+
+fn build_day_chat_system_instruction(
+    today: &str,
+    trip_title: &str,
+    day_number: i64,
+    date: &str,
+    schedule_text: &str,
+    web_search_active: bool,
+) -> String {
+    format!(
+        "{TRADITIONAL_CHINESE_SYSTEM_RULE}\n\n\
+        你是一位貼心且熟悉當地旅遊的繁體中文（台灣用語）AI 行程助手。今天日期：{today}。\n\
+        請完全根據旅客「當天」的真實行程資料回答問題，包含路線順暢度、交通與時間分配、附近美食或伴手禮、拍照與備案建議。\n\
+        回答請精簡好讀（適合手機螢幕閱讀），全程嚴格使用繁體中文（台灣用語），搭配換行或「•」「1.」條列排版，切勿使用 Markdown 語法（如 **粗體**、### 標題）或 LaTeX 數學符號，也不要捏造行程表中不存在的預訂時間。{}\n\n\
+        【行程主題】{trip_title}\n\
+        【日期】第 {day_number} 天（{date}）\n\
+        【當日行程表（依順序排列）】\n{schedule_text}",
+        web_search_prompt_instruction(web_search_active),
+    )
+}
+
+fn build_item_chat_system_instruction(
+    today: &str,
+    trip_title: &str,
+    day_number: i64,
+    date: &str,
+    start_time: &str,
+    item_name: &str,
+    duration_minutes: i64,
+    cached_story: Option<&str>,
+    web_search_active: bool,
+) -> String {
+    let mut instruction = format!(
+        "{TRADITIONAL_CHINESE_SYSTEM_RULE}\n\n\
+        你是一位親切專業的繁體中文（台灣用語）私人旅遊導覽員。今天日期：{today}。\n\
+        旅客目前正在查看行程中的單一景點，請針對這個景點回答他的問題（例如必看亮點、必吃美食、停留時間安排、排隊技巧、親子或雨天備案等）。\n\
+        回答請簡潔自然、適合手機畫面閱讀；全程嚴格使用繁體中文（台灣用語），使用純文字與換行或「•」「1.」條列，切勿使用 Markdown 語法（如 **粗體**、### 標題）或 LaTeX 數學符號。{}\n\n\
+        【行程主題】{trip_title}\n\
+        【日期與時段】第 {day_number} 天（{date}）{start_time}\n\
+        【景點 / 活動名稱】{item_name}\n\
+        【停留安排】{}",
+        web_search_prompt_instruction(web_search_active),
+        format_stay_for_prompt(duration_minutes),
+    );
+
+    if let Some(story) = cached_story.map(str::trim).filter(|s| !s.is_empty()) {
+        instruction.push_str(&format!("\n【景點背景摘要】{story}"));
+    }
+
+    instruction
 }
 
 pub async fn chat_day(
@@ -542,15 +594,14 @@ pub async fn chat_day(
 
     let today = chrono::Local::now().format("%Y-%m-%d").to_string();
     let web_search_active = req.enable_web_search && state.tavily.is_enabled();
-    let system_instruction = format!(
-        "你是一位貼心且熟悉當地旅遊的繁體中文（台灣用語）AI 行程助手。今天日期：{today}。\n\
-        請完全根據旅客「當天」的真實行程資料回答問題，包含路線順暢度、交通與時間分配、附近美食或伴手禮、拍照與備案建議。\n\
-        回答請精簡好讀（適合手機螢幕閱讀），請用純文字搭配換行或「•」「1.」條列排版，切勿使用 Markdown 語法（如 **粗體**、### 標題）或 LaTeX 數學符號，也不要捏造行程表中不存在的預訂時間。{}\n\n\
-        【行程主題】{trip_title}\n\
-        【日期】第 {day_number} 天（{date}）\n\
-        【當日行程表（依順序排列）】\n{}",
-        web_search_prompt_instruction(web_search_active),
-        schedule_lines.join("\n")
+    let schedule_text = schedule_lines.join("\n");
+    let system_instruction = build_day_chat_system_instruction(
+        &today,
+        &trip_title,
+        day_number,
+        &date,
+        &schedule_text,
+        web_search_active,
     );
 
     let tavily = if req.enable_web_search {
@@ -605,21 +656,17 @@ pub async fn chat_item(
 
     let today = chrono::Local::now().format("%Y-%m-%d").to_string();
     let web_search_active = req.enable_web_search && state.tavily.is_enabled();
-    let mut system_instruction = format!(
-        "你是一位親切專業的繁體中文（台灣用語）私人旅遊導覽員。今天日期：{today}。\n\
-        旅客目前正在查看行程中的單一景點，請針對這個景點回答他的問題（例如必看亮點、必吃美食、停留時間安排、排隊技巧、親子或雨天備案等）。\n\
-        回答請簡潔自然、適合手機畫面閱讀；請使用純文字與換行或「•」「1.」條列，切勿使用 Markdown 語法（如 **粗體**、### 標題）或 LaTeX 數學符號。{}\n\n\
-        【行程主題】{trip_title}\n\
-        【日期與時段】第 {day_number} 天（{date}）{start_time}\n\
-        【景點 / 活動名稱】{item_name}\n\
-        【停留安排】{}",
-        web_search_prompt_instruction(web_search_active),
-        format_stay_for_prompt(duration_minutes)
+    let system_instruction = build_item_chat_system_instruction(
+        &today,
+        &trip_title,
+        day_number,
+        &date,
+        &start_time,
+        &item_name,
+        duration_minutes,
+        cached_story.as_deref(),
+        web_search_active,
     );
-
-    if let Some(story) = cached_story {
-        system_instruction.push_str(&format!("\n【景點背景摘要】{story}"));
-    }
 
     let tavily = if req.enable_web_search {
         Some(&state.tavily)
@@ -668,5 +715,36 @@ mod tests {
             sanitize_text_for_tts("  https://example.com   **__`###`__**  "),
             ""
         );
+    }
+
+    #[test]
+    fn chat_system_instructions_enforce_traditional_chinese_with_and_without_web_search() {
+        let day_with_web = build_day_chat_system_instruction(
+            "2026-11-24",
+            "2026大阪秋季漫遊",
+            1,
+            "2026/11/26",
+            "#1 11:10 關西國際機場（預計停留 90 分鐘）",
+            true,
+        );
+        assert!(day_with_web.contains("最高優先語言規範"));
+        assert!(day_with_web.contains("絕對禁止使用任何簡體字"));
+        assert!(day_with_web.contains("即使搜尋到的網頁或原始資料為簡體中文、英文或日文"));
+
+        let item_without_web = build_item_chat_system_instruction(
+            "2026-11-24",
+            "2026大阪秋季漫遊",
+            1,
+            "2026/11/26",
+            "11:10",
+            "Kansai International Airport",
+            90,
+            Some("關西地區重要國際門戶"),
+            false,
+        );
+        assert!(item_without_web.contains("最高優先語言規範"));
+        assert!(item_without_web.contains("全程嚴格使用繁體中文（台灣用語）"));
+        assert!(item_without_web.contains("【景點背景摘要】關西地區重要國際門戶"));
+        assert!(!item_without_web.contains("web_search"));
     }
 }

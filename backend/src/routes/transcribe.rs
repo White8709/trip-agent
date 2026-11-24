@@ -13,7 +13,7 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 use tokio_tungstenite::{connect_async, tungstenite::Message as TungsteniteMessage};
 
-use crate::{db::AppState, error::AppError};
+use crate::{db::AppState, error::AppError, gemini::convert_to_zh_tw_preserving_urls};
 
 #[derive(Debug, Deserialize)]
 pub struct TranscribeQuery {
@@ -258,9 +258,10 @@ async fn handle_live_transcribe(client_ws: WebSocket, state: AppState) {
                             }
                             let events = extract_transcription_events(&payload);
                             if let Some(interim) = events.interim {
+                                let normalized = convert_to_zh_tw_preserving_urls(&interim);
                                 if send_client_json(
                                     &mut client_write,
-                                    json!({ "type": "interim", "text": interim }),
+                                    json!({ "type": "interim", "text": normalized }),
                                 )
                                 .await
                                 .is_err()
@@ -269,9 +270,10 @@ async fn handle_live_transcribe(client_ws: WebSocket, state: AppState) {
                                 }
                             }
                             if let Some(final_text) = events.final_text {
+                                let normalized = convert_to_zh_tw_preserving_urls(&final_text);
                                 if send_client_json(
                                     &mut client_write,
-                                    json!({ "type": "final", "text": final_text }),
+                                    json!({ "type": "final", "text": normalized }),
                                 )
                                 .await
                                 .is_err()
