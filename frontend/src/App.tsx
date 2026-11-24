@@ -124,7 +124,7 @@ export function App() {
         <div className="w-12 h-12 rounded-full bg-error-container dark:bg-rose-950/60 text-error dark:text-rose-300 flex items-center justify-center">
           <span className="material-symbols-outlined text-[24px]">cloud_off</span>
         </div>
-        <div className="max-w-[340px] flex flex-col gap-1">
+        <div className="max-w-[340px] sm:max-w-md flex flex-col gap-1">
           <h1 className="font-headline-sm text-headline-sm">連線失敗</h1>
           <p className="text-body-sm text-on-surface-variant dark:text-slate-400">{bootError}</p>
         </div>
@@ -146,9 +146,22 @@ export function App() {
           trip={trip}
           isDark={isDark}
           webSearchAvailable={webSearchAvailable}
+          activeGuideItemId={selectedItem?.item_id ?? null}
           onToggleTheme={toggleTheme}
           onOpenDeviceModal={() => setDeviceModalOpen(true)}
           onSelectGuide={(item) => setSelectedItem(item)}
+          renderGuidePanel={(currentDayItems) => (
+            <AiGuideSheet
+              item={selectedItem}
+              webSearchAvailable={webSearchAvailable}
+              fontSizeLabel={fontSizeLabel}
+              onCycleFontSize={cycleFontSize}
+              onClose={() => setSelectedItem(null)}
+              onStyleCached={handleStyleCached}
+              quickPickItems={currentDayItems}
+              onSelectQuickItem={(item) => setSelectedItem(item)}
+            />
+          )}
         />
       ) : (
         <ImportPage
@@ -161,15 +174,6 @@ export function App() {
         />
       )}
 
-      <AiGuideSheet
-        item={selectedItem}
-        webSearchAvailable={webSearchAvailable}
-        fontSizeLabel={fontSizeLabel}
-        onCycleFontSize={cycleFontSize}
-        onClose={() => setSelectedItem(null)}
-        onStyleCached={handleStyleCached}
-      />
-
       <DeviceModal
         isOpen={deviceModalOpen}
         profile={profile}
@@ -178,6 +182,7 @@ export function App() {
         onClose={() => setDeviceModalOpen(false)}
         onOpenImport={() => {
           setDeviceModalOpen(false);
+          setSelectedItem(null);
           setView('import');
         }}
         onUpdateName={handleUpdateDeviceName}

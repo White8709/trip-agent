@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { useBodyScrollLock } from '../hooks/useBodyScrollLock';
 import { FONT_SIZE_OPTIONS, FontSizePreset } from '../hooks/useFontSize';
 import { DeviceProfile } from '../lib/api';
 
@@ -49,6 +50,8 @@ export const DeviceModal: React.FC<DeviceModalProps> = ({
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [isOpen, onClose]);
+
+  useBodyScrollLock(isOpen);
 
   if (!isOpen) return null;
 
@@ -110,11 +113,11 @@ export const DeviceModal: React.FC<DeviceModalProps> = ({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-[#1A202C]/40 backdrop-blur-sm"
+      className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 md:p-6 bg-[#1A202C]/40 backdrop-blur-sm"
       onClick={onClose}
     >
       <div
-        className="w-full max-w-[400px] max-h-[90dvh] overflow-y-auto bg-surface-container-lowest dark:bg-[#1E2026] rounded-xl p-5 shadow-xl border border-transparent dark:border-white/[0.08] flex flex-col gap-4"
+        className="w-full max-w-[420px] sm:max-w-[480px] md:max-w-[520px] max-h-[90dvh] overflow-y-auto overscroll-contain bg-surface-container-lowest dark:bg-[#1E2026] rounded-xl sm:rounded-2xl p-4 sm:p-5 md:p-6 shadow-xl border border-transparent dark:border-white/[0.08] flex flex-col gap-4"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between">
@@ -229,7 +232,7 @@ export const DeviceModal: React.FC<DeviceModalProps> = ({
           <span className="text-label-sm font-label-sm text-on-surface-variant dark:text-slate-400">
             本機專屬綁定碼
           </span>
-          <div className="flex items-center justify-between gap-2">
+          <div className="flex flex-wrap items-center justify-between gap-2">
             <code className="font-mono text-[16px] font-bold tracking-wider text-primary dark:text-[#ff9c85] select-all">
               {profile?.binding_code ?? '載入中...'}
             </code>

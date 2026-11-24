@@ -320,7 +320,7 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
       />
 
       {/* Message List */}
-      <div className="flex-1 overflow-y-auto px-5 py-4 flex flex-col gap-3">
+      <div className="flex-1 overflow-y-auto overscroll-contain px-4 sm:px-5 md:px-6 xl:px-5 py-4 flex flex-col gap-3">
         {messages.length === 0 ? (
           <div className="flex flex-col gap-3 py-2">
             <div className="rounded-xl bg-surface-container-low/70 dark:bg-[#22252D] p-4 flex items-start gap-3">
@@ -401,7 +401,7 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
                 className={`flex flex-col ${isUser ? 'items-end' : 'items-start'} gap-1.5`}
               >
                 <div
-                  className={`max-w-[85%] rounded-2xl px-3.5 py-2.5 text-body-sm font-body-sm leading-relaxed whitespace-pre-wrap break-words ${
+                  className={`max-w-[88%] sm:max-w-[82%] md:max-w-[78%] rounded-2xl px-3.5 py-2.5 text-body-sm font-body-sm leading-relaxed whitespace-pre-wrap break-words ${
                     isUser
                       ? 'bg-primary-container text-on-primary rounded-br-sm shadow-xs'
                       : 'bg-surface-container-low dark:bg-[#24272E] text-on-surface dark:text-slate-200 rounded-bl-sm'
@@ -489,7 +489,7 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
                               title={src.url}
                               className="inline-flex items-center gap-1 max-w-full px-2.5 py-1 rounded-full bg-secondary-fixed/40 dark:bg-sky-950/40 border border-secondary-fixed-dim/50 dark:border-sky-500/25 text-secondary dark:text-sky-300 hover:bg-secondary-fixed/70 dark:hover:bg-sky-900/50 text-label-sm font-label-sm transition-colors"
                             >
-                              <span className="truncate max-w-[180px]">
+                              <span className="truncate max-w-[180px] sm:max-w-[260px] xl:max-w-[200px] 2xl:max-w-[240px]">
                                 {src.title || host || src.url}
                               </span>
                               {src.title && host && (
@@ -541,7 +541,7 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
       </div>
 
       {/* Bottom Sticky Single-Row Icon-Only Input Bar */}
-      <div className="px-4 py-2.5 bg-surface-container-low/90 dark:bg-[#14171D] border-t border-surface-container-high/60 dark:border-white/[0.08] flex flex-col gap-2 shrink-0">
+      <div className="px-3 sm:px-4 md:px-5 py-2.5 sm:py-3 bg-surface-container-low/90 dark:bg-[#14171D] border-t border-surface-container-high/60 dark:border-white/[0.08] flex flex-col gap-2 shrink-0">
         {voiceError && (
           <div className="flex items-center justify-between gap-2 px-3 py-1.5 rounded-lg bg-error-container/80 dark:bg-rose-950/60 border border-error/20 dark:border-rose-500/30 text-on-error-container dark:text-rose-200 text-label-sm font-label-sm">
             <div className="flex items-center gap-1.5 min-w-0">
@@ -594,7 +594,7 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
             aria-pressed={webSearchAvailable ? webSearchEnabled : false}
             aria-label={webSearchLabel}
             title={webSearchTitle}
-            className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 transition-all active:scale-95 ${
+            className={`w-9 h-9 sm:w-10 sm:h-10 rounded-xl flex items-center justify-center shrink-0 transition-all active:scale-95 ${
               !webSearchAvailable
                 ? 'bg-surface-container dark:bg-[#24272E] text-on-surface-variant/50 dark:text-slate-500 border border-surface-container-high/50 dark:border-white/[0.05] opacity-50 cursor-not-allowed'
                 : webSearchEnabled
@@ -614,7 +614,7 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
             aria-pressed={voiceState === 'recording'}
             aria-label={voiceLabel}
             title={voiceTitle}
-            className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 transition-all active:scale-95 disabled:opacity-55 ${
+            className={`w-9 h-9 sm:w-10 sm:h-10 rounded-xl flex items-center justify-center shrink-0 transition-all active:scale-95 disabled:opacity-55 ${
               voiceState === 'recording'
                 ? 'bg-rose-500 text-white border border-rose-500 shadow-sm animate-pulse'
                 : voiceState === 'connecting' || voiceState === 'finishing'
@@ -639,7 +639,7 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
             onKeyDown={handleKeyDown}
             disabled={sending}
             placeholder={placeholder}
-            className="flex-1 min-w-0 h-10 px-3 rounded-xl bg-surface-container-lowest dark:bg-[#22252D] text-body-md text-on-surface dark:text-slate-100 placeholder:text-on-surface-variant/55 dark:placeholder:text-slate-500 border border-surface-container-high dark:border-white/[0.08] focus:outline-none focus:ring-1 focus:ring-primary-container disabled:opacity-60"
+            className="flex-1 min-w-0 h-9 sm:h-10 px-3 rounded-xl bg-surface-container-lowest dark:bg-[#22252D] text-body-md text-on-surface dark:text-slate-100 placeholder:text-on-surface-variant/55 dark:placeholder:text-slate-500 border border-surface-container-high dark:border-white/[0.08] focus:outline-none focus:ring-1 focus:ring-primary-container disabled:opacity-60"
           />
 
           <button
@@ -647,7 +647,7 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
             disabled={!input.trim() || sending}
             aria-label="傳送訊息"
             title="傳送訊息"
-            className="w-10 h-10 rounded-xl bg-primary-container text-on-primary flex items-center justify-center shadow-sm hover:opacity-95 active:scale-95 transition-all shrink-0 disabled:opacity-45 disabled:cursor-not-allowed"
+            className="w-9 h-9 sm:w-10 sm:h-10 rounded-xl bg-primary-container text-on-primary flex items-center justify-center shadow-sm hover:opacity-95 active:scale-95 transition-all shrink-0 disabled:opacity-45 disabled:cursor-not-allowed"
           >
             <span aria-hidden="true" className="material-symbols-outlined text-[20px] select-none">
               send

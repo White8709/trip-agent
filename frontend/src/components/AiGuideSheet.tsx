@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
+import { useBodyScrollLock, useMediaQuery } from '../hooks/useBodyScrollLock';
 import {
   ChatMessage,
   chatWithItem,
@@ -21,6 +22,8 @@ interface AiGuideSheetProps {
   onCycleFontSize: () => void;
   onClose: () => void;
   onStyleCached: (itemId: number, style: GuideStyle) => void;
+  quickPickItems?: TripItem[];
+  onSelectQuickItem?: (item: TripItem) => void;
 }
 
 const STYLE_OPTIONS: { id: GuideStyle; label: string; icon: string }[] = [
@@ -54,6 +57,8 @@ export const AiGuideSheet: React.FC<AiGuideSheetProps> = ({
   onCycleFontSize,
   onClose,
   onStyleCached,
+  quickPickItems = [],
+  onSelectQuickItem,
 }) => {
   const [activeTab, setActiveTab] = useState<SheetTab>('guide');
   const [style, setStyle] = useState<GuideStyle>('cultural');
@@ -91,15 +96,18 @@ export const AiGuideSheet: React.FC<AiGuideSheetProps> = ({
     }
   }, [item?.item_id]);
 
-  // Escape key closes sheet
+  const isXlDesktop = useMediaQuery('(min-width: 1280px)');
+  useBodyScrollLock(Boolean(item) && !isXlDesktop);
+
+  // Escape key closes overlay sheet (mobile / tablet / small desktop)
   useEffect(() => {
-    if (!item) return;
+    if (!item || isXlDesktop) return;
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') onClose();
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [item, onClose]);
+  }, [item, isXlDesktop, onClose]);
 
   // Reset audio playback state whenever audio URL changes
   useEffect(() => {
@@ -151,7 +159,60 @@ export const AiGuideSheet: React.FC<AiGuideSheetProps> = ({
     };
   }, [item?.item_id, style, reloadNonce]);
 
-  if (!item) return null;
+  if (!item) {
+    const picks = quickPickItems.slice(0, 3);
+    return (
+      <aside
+        aria-label="AI 景點導覽面板"
+        className="hidden xl:flex xl:flex-col xl:w-[440px] 2xl:w-[500px] xl:shrink-0 xl:sticky xl:top-[84px] xl:h-[calc(100dvh-104px)] bg-surface-container-lowest dark:bg-[#1A1D24] rounded-2xl border border-surface-container-high/70 dark:border-white/[0.08] shadow-sm overflow-hidden"
+      >
+        <div className="flex-1 flex flex-col items-center justify-center p-6 text-center gap-4">
+          <div className="w-12 h-12 rounded-2xl bg-primary-fixed/60 dark:bg-primary/20 text-primary dark:text-[#ff9c85] flex items-center justify-center shadow-xs">
+            <span aria-hidden="true" className="material-symbols-outlined text-[24px] select-none">
+              auto_awesome
+            </span>
+          </div>
+          <div className="max-w-[300px] flex flex-col gap-1.5">
+            <h2 className="font-headline-sm text-headline-sm text-on-surface dark:text-white">
+              景點 AI 導覽與對話
+            </h2>
+            <p className="text-body-sm font-body-sm text-on-surface-variant dark:text-slate-400 leading-relaxed">
+              點選左側任一景點卡片，即可在此查看專屬導覽文案、語音導覽與 AI 問答，同時保留左側完整時間軸。
+            </p>
+          </div>
+
+          {picks.length > 0 && onSelectQuickItem && (
+            <div className="w-full max-w-[320px] pt-2 flex flex-col gap-1.5 text-left">
+              <span className="text-label-sm font-label-sm text-on-surface-variant dark:text-slate-400 px-1">
+                快速開啟當日站點：
+              </span>
+              {picks.map((stop) => (
+                <button
+                  key={stop.item_id}
+                  type="button"
+                  onClick={() => onSelectQuickItem(stop)}
+                  className="w-full px-3 py-2 rounded-xl bg-surface-container-low/70 dark:bg-[#24272E] hover:bg-surface-container dark:hover:bg-[#2E323C] border border-surface-container-high/60 dark:border-white/[0.06] flex items-center justify-between gap-2 transition-colors active:scale-[0.99]"
+                >
+                  <span className="text-body-sm font-body-sm text-on-surface dark:text-slate-200 truncate">
+                    <span className="font-semibold text-primary dark:text-[#ff9c85] tabular-nums mr-1.5">
+                      {stop.start_time}
+                    </span>
+                    {stop.name}
+                  </span>
+                  <span
+                    aria-hidden="true"
+                    className="material-symbols-outlined text-[16px] text-on-surface-variant dark:text-slate-400 shrink-0 select-none"
+                  >
+                    arrow_forward
+                  </span>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      </aside>
+    );
+  }
 
   const handleRegenerateText = async () => {
     if (!item || loadingText) return;
@@ -266,20 +327,22 @@ export const AiGuideSheet: React.FC<AiGuideSheetProps> = ({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-end justify-center bg-[#1A202C]/35 backdrop-blur-sm"
-      onClick={onClose}
+      className="fixed inset-0 z-50 flex items-end justify-center md:items-stretch md:justify-end bg-[#1A202C]/35 backdrop-blur-sm xl:sticky xl:inset-auto xl:top-[84px] xl:z-20 xl:block xl:w-[440px] 2xl:w-[500px] xl:shrink-0 xl:bg-transparent xl:backdrop-blur-none"
+      onClick={() => {
+        if (!isXlDesktop) onClose();
+      }}
     >
       <div
-        className="animate-sheet-up w-full max-w-[430px] h-[85dvh] bg-surface-container-lowest dark:bg-[#1A1D24] rounded-t-2xl shadow-2xl border-t border-transparent dark:border-white/[0.08] flex flex-col overflow-hidden pb-safe"
+        className="animate-sheet-responsive w-full max-w-[540px] h-[88dvh] md:h-dvh md:w-[520px] lg:w-[560px] md:max-w-[92vw] xl:animate-none xl:w-full xl:max-w-none xl:h-[calc(100dvh-104px)] bg-surface-container-lowest dark:bg-[#1A1D24] rounded-t-2xl md:rounded-none md:rounded-l-2xl xl:rounded-2xl shadow-2xl xl:shadow-sm border-t md:border-t-0 md:border-l xl:border border-surface-container-high/70 dark:border-white/[0.08] flex flex-col overflow-hidden pb-safe xl:pb-0"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Drag Handle */}
-        <div className="pt-2.5 pb-1 flex justify-center shrink-0">
+        <div className="md:hidden pt-2.5 pb-1 flex justify-center shrink-0">
           <div className="w-10 h-1 rounded-full bg-surface-container-highest dark:bg-slate-600" />
         </div>
 
         {/* Sheet Header */}
-        <div className="px-5 pt-2 pb-3 border-b border-surface-container-high/50 dark:border-white/[0.07] flex items-start justify-between gap-3 shrink-0">
+        <div className="px-4 sm:px-5 md:px-6 xl:px-5 pt-2 md:pt-3.5 xl:pt-3 pb-3 border-b border-surface-container-high/50 dark:border-white/[0.07] flex items-start justify-between gap-3 shrink-0">
           <div className="min-w-0">
             <div className="flex items-center gap-2 mb-1">
               <span
@@ -337,7 +400,7 @@ export const AiGuideSheet: React.FC<AiGuideSheetProps> = ({
         </div>
 
         {/* Mode Tabs: 導覽內容 vs 景點 AI 對話 */}
-        <div className="px-5 py-2 bg-surface-container-low/70 dark:bg-[#14171D] border-b border-surface-container-high/40 dark:border-white/[0.06] shrink-0">
+        <div className="px-4 sm:px-5 md:px-6 xl:px-5 py-2 bg-surface-container-low/70 dark:bg-[#14171D] border-b border-surface-container-high/40 dark:border-white/[0.06] shrink-0">
           <div className="grid grid-cols-2 gap-1.5 p-1 rounded-xl bg-surface-container dark:bg-[#22252D]">
             <button
               type="button"
@@ -394,7 +457,7 @@ export const AiGuideSheet: React.FC<AiGuideSheetProps> = ({
         ) : (
           <>
             {/* Style Switcher Pills */}
-            <div className="px-5 py-2.5 bg-surface-container-low/50 dark:bg-[#14171D] border-b border-surface-container-high/40 dark:border-white/[0.05] flex items-center gap-2 overflow-x-auto no-scrollbar shrink-0">
+            <div className="px-4 sm:px-5 md:px-6 xl:px-5 py-2.5 bg-surface-container-low/50 dark:bg-[#14171D] border-b border-surface-container-high/40 dark:border-white/[0.05] flex items-center gap-2 overflow-x-auto no-scrollbar shrink-0">
           {STYLE_OPTIONS.map((opt) => {
             const active = style === opt.id;
             const isCached = item.cached_styles.includes(opt.id);
@@ -428,7 +491,7 @@ export const AiGuideSheet: React.FC<AiGuideSheetProps> = ({
         </div>
 
         {/* Scrollable Content Body */}
-        <div className="flex-1 overflow-y-auto px-5 py-4 flex flex-col gap-4">
+        <div className="flex-1 overflow-y-auto overscroll-contain px-4 sm:px-5 md:px-6 xl:px-5 py-4 flex flex-col gap-4">
           {error && (
             <div className="rounded-xl bg-error-container/80 dark:bg-rose-950/60 border border-error/20 dark:border-rose-500/30 p-3.5 text-on-error-container dark:text-rose-200 text-body-sm flex flex-col gap-2">
               <div className="flex items-start gap-2">
@@ -560,7 +623,7 @@ export const AiGuideSheet: React.FC<AiGuideSheetProps> = ({
                       </span>
                       網路參考來源
                     </h3>
-                    <ul className="flex flex-col gap-1.5">
+                    <ul className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-1 2xl:grid-cols-2 gap-2">
                       {safeSources.map((src, idx) => {
                         const host = getSourceHost(src.url);
                         return (
@@ -600,7 +663,7 @@ export const AiGuideSheet: React.FC<AiGuideSheetProps> = ({
 
         {/* Sticky Audio Footer */}
         {guide && !loadingText && (
-          <div className="px-5 py-3.5 bg-surface-container-low/90 dark:bg-[#14171D] border-t border-surface-container-high/60 dark:border-white/[0.08] shrink-0">
+          <div className="px-4 sm:px-5 md:px-6 xl:px-5 py-3.5 bg-surface-container-low/90 dark:bg-[#14171D] border-t border-surface-container-high/60 dark:border-white/[0.08] shrink-0">
             {!guide.audio_url ? (
               <div className="flex justify-center">
                 <button

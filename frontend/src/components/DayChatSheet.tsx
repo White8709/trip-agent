@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { useBodyScrollLock } from '../hooks/useBodyScrollLock';
 import { ChatMessage, chatWithDay, TripDay } from '../lib/api';
 import { formatDateWithWeekday } from '../lib/parser';
 import { ChatPanel } from './ChatPanel';
@@ -52,6 +53,8 @@ export const DayChatSheet: React.FC<DayChatSheetProps> = ({
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [isOpen, onClose]);
+
+  useBodyScrollLock(Boolean(isOpen && day));
 
   if (!isOpen || !day) return null;
 
@@ -107,20 +110,20 @@ export const DayChatSheet: React.FC<DayChatSheetProps> = ({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-end justify-center bg-[#1A202C]/35 backdrop-blur-sm"
+      className="fixed inset-0 z-50 flex items-end justify-center md:items-stretch md:justify-end bg-[#1A202C]/35 backdrop-blur-sm"
       onClick={onClose}
     >
       <div
-        className="animate-sheet-up w-full max-w-[430px] h-[82dvh] bg-surface-container-lowest dark:bg-[#1A1D24] rounded-t-2xl shadow-2xl border-t border-transparent dark:border-white/[0.08] flex flex-col overflow-hidden pb-safe"
+        className="animate-sheet-responsive w-full max-w-[540px] h-[85dvh] md:h-dvh md:w-[480px] lg:w-[540px] xl:w-[520px] md:max-w-[92vw] bg-surface-container-lowest dark:bg-[#1A1D24] rounded-t-2xl md:rounded-none md:rounded-l-2xl shadow-2xl border-t md:border-t-0 md:border-l border-transparent dark:border-white/[0.08] flex flex-col overflow-hidden pb-safe md:pb-0"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Drag Handle */}
-        <div className="pt-2.5 pb-1 flex justify-center shrink-0">
+        <div className="md:hidden pt-2.5 pb-1 flex justify-center shrink-0">
           <div className="w-10 h-1 rounded-full bg-surface-container-highest dark:bg-slate-600" />
         </div>
 
         {/* Sheet Header */}
-        <div className="px-5 pt-2 pb-3 border-b border-surface-container-high/50 dark:border-white/[0.07] flex items-start justify-between gap-3 shrink-0">
+        <div className="px-4 sm:px-5 md:px-6 pt-2 md:pt-4 pb-3 border-b border-surface-container-high/50 dark:border-white/[0.07] flex items-start justify-between gap-3 shrink-0">
           <div className="min-w-0">
             <div className="flex items-center gap-2 mb-1">
               <span
@@ -167,7 +170,7 @@ export const DayChatSheet: React.FC<DayChatSheetProps> = ({
         </div>
 
         {/* Active Day Stops Context Bar */}
-        <div className="px-5 py-2 bg-surface-container-low/60 dark:bg-[#14171D] border-b border-surface-container-high/40 dark:border-white/[0.05] flex items-center gap-1.5 overflow-x-auto no-scrollbar shrink-0">
+        <div className="px-4 sm:px-5 md:px-6 py-2 bg-surface-container-low/60 dark:bg-[#14171D] border-b border-surface-container-high/40 dark:border-white/[0.05] flex items-center gap-1.5 overflow-x-auto no-scrollbar md:flex-wrap md:overflow-x-visible md:max-h-24 md:overflow-y-auto shrink-0">
           <span className="text-label-sm font-label-sm text-on-surface-variant dark:text-slate-400 shrink-0 mr-1">
             當日 {day.items.length} 站：
           </span>
