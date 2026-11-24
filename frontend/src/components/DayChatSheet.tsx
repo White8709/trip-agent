@@ -123,9 +123,14 @@ export const DayChatSheet: React.FC<DayChatSheetProps> = ({
         <div className="px-5 pt-2 pb-3 border-b border-surface-container-high/50 dark:border-white/[0.07] flex items-start justify-between gap-3 shrink-0">
           <div className="min-w-0">
             <div className="flex items-center gap-2 mb-1">
-              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-primary-fixed/60 dark:bg-primary/20 text-primary dark:text-[#ff9c85] text-label-sm font-label-sm font-semibold">
-                <span className="material-symbols-outlined text-[13px]">auto_awesome</span>
-                當天 AI 行程助手
+              <span
+                aria-label="當天 AI 行程助手"
+                title="當天 AI 行程助手"
+                className="w-6 h-6 rounded-full inline-flex items-center justify-center bg-primary-fixed/60 dark:bg-primary/20 text-primary dark:text-[#ff9c85] shrink-0"
+              >
+                <span aria-hidden="true" className="material-symbols-outlined text-[14px] select-none">
+                  auto_awesome
+                </span>
               </span>
               <span className="text-label-sm font-label-sm text-on-surface-variant dark:text-slate-400 truncate">
                 {tripTitle}
@@ -152,6 +157,7 @@ export const DayChatSheet: React.FC<DayChatSheetProps> = ({
             <button
               type="button"
               onClick={onClose}
+              title="關閉 AI 行程助手"
               aria-label="關閉 AI 行程助手"
               className="w-9 h-9 rounded-full flex items-center justify-center text-on-surface-variant dark:text-slate-400 hover:bg-surface-container dark:hover:bg-[#2A2D35] transition-colors"
             >

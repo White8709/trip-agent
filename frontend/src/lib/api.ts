@@ -204,6 +204,23 @@ export async function generateGuideAudio(
   return res.audio_url;
 }
 
+export async function generateChatAudio(text: string): Promise<string> {
+  const res = await requestJson<{ audio_url: string }>('/api/tts', {
+    method: 'POST',
+    body: JSON.stringify({ text }),
+  });
+  return res.audio_url;
+}
+
+export function buildTranscribeWsUrl(): string {
+  const token = getStoredDeviceToken()?.trim();
+  if (!token) {
+    throw new Error('找不到裝置憑證，請重新整理頁面後再使用語音輸入。');
+  }
+  const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+  return `${proto}//${window.location.host}/api/transcribe/live?token=${encodeURIComponent(token)}`;
+}
+
 export interface ChatMessage {
   role: 'user' | 'model';
   content: string;

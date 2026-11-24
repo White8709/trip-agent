@@ -24,7 +24,7 @@ use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 use crate::{
     db::{init_pool, AppState},
     gemini::{GeminiClient, GeminiConfig},
-    routes::{auth, guides, trips},
+    routes::{auth, guides, transcribe, trips},
     tavily::{TavilyClient, TavilyConfig},
 };
 
@@ -80,6 +80,11 @@ async fn main() {
         tts_voice: std::env::var("GEMINI_TTS_VOICE").unwrap_or_else(|_| "Leda".to_string()),
         tts_style: std::env::var("GEMINI_TTS_STYLE")
             .unwrap_or_else(|_| "口語化台灣年輕女性, 1.2倍速".to_string()),
+        stt_model: std::env::var("GEMINI_STT_MODEL")
+            .ok()
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .unwrap_or_else(|| "gemini-3.5-transcribe-live".to_string()),
     };
 
     let tavily_config = TavilyConfig {
@@ -124,7 +129,10 @@ async fn main() {
             post(guides::generate_guide_audio),
         )
         .route("/api/items/{item_id}/chat", post(guides::chat_item))
-        .route("/api/audio/{guide_id}", get(guides::serve_audio));
+        .route("/api/audio/{guide_id}", get(guides::serve_audio))
+        .route("/api/transcribe/live", get(transcribe::transcribe_live))
+        .route("/api/tts", post(guides::generate_chat_tts))
+        .route("/api/tts/audio/{audio_hash}", get(guides::serve_chat_audio));
 
     let mut app = api_router
         .with_state(state)

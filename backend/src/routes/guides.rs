@@ -1,11 +1,15 @@
+use std::{path::Path, sync::OnceLock};
+
 use axum::{
-    extract::{Path, Query, State},
+    extract::{Path as AxumPath, Query, State},
     http::{header, StatusCode},
     response::IntoResponse,
     Json,
 };
 use chrono::{SecondsFormat, Utc};
+use regex::Regex;
 use serde::Deserialize;
+use sha2::{Digest, Sha256};
 use sqlx::Row;
 use uuid::Uuid;
 
@@ -17,7 +21,7 @@ use crate::{
         WebSource,
     },
     routes::auth::DeviceAuth,
-    tavily::dedupe_sources,
+    tavily::{dedupe_sources, truncate_chars},
 };
 
 #[derive(Debug, Deserialize)]
@@ -117,7 +121,7 @@ fn row_to_guide_response(
 pub async fn get_guide(
     auth: DeviceAuth,
     State(state): State<AppState>,
-    Path(item_id): Path<i64>,
+    AxumPath(item_id): AxumPath<i64>,
     Query(query): Query<GuideQuery>,
 ) -> Result<Json<GuideEnvelope>, AppError> {
     let style = parse_style(query.style.as_deref())?;
@@ -143,7 +147,7 @@ pub async fn get_guide(
 pub async fn generate_guide(
     auth: DeviceAuth,
     State(state): State<AppState>,
-    Path(item_id): Path<i64>,
+    AxumPath(item_id): AxumPath<i64>,
     Json(req): Json<GenerateGuideRequest>,
 ) -> Result<Json<GuideEnvelope>, AppError> {
     let style = parse_style(req.style.as_deref())?;
@@ -287,7 +291,7 @@ pub async fn generate_guide(
 pub async fn generate_guide_audio(
     auth: DeviceAuth,
     State(state): State<AppState>,
-    Path(item_id): Path<i64>,
+    AxumPath(item_id): AxumPath<i64>,
     Json(req): Json<GenerateGuideRequest>,
 ) -> Result<Json<AudioResponse>, AppError> {
     let style = parse_style(req.style.as_deref())?;
@@ -339,18 +343,8 @@ pub async fn generate_guide_audio(
     }))
 }
 
-pub async fn serve_audio(
-    State(state): State<AppState>,
-    Path(guide_id): Path<String>,
-) -> Result<impl IntoResponse, AppError> {
-    let parsed_uuid = Uuid::parse_str(guide_id.trim())
-        .map_err(|_| AppError::BadRequest("無效的語音識別碼。".to_string()))?;
-
-    let disk_path = state
-        .audio_cache_dir
-        .join(format!("{}.wav", parsed_uuid));
-
-    let bytes = tokio::fs::read(&disk_path).await.map_err(|err| {
+async fn read_wav_response(disk_path: &Path) -> Result<impl IntoResponse, AppError> {
+    let bytes = tokio::fs::read(disk_path).await.map_err(|err| {
         if err.kind() == std::io::ErrorKind::NotFound {
             AppError::NotFound("找不到該語音檔案。".to_string())
         } else {
@@ -366,6 +360,123 @@ pub async fn serve_audio(
         ],
         bytes,
     ))
+}
+
+pub async fn serve_audio(
+    State(state): State<AppState>,
+    AxumPath(guide_id): AxumPath<String>,
+) -> Result<impl IntoResponse, AppError> {
+    let parsed_uuid = Uuid::parse_str(guide_id.trim())
+        .map_err(|_| AppError::BadRequest("無效的語音識別碼。".to_string()))?;
+
+    let disk_path = state
+        .audio_cache_dir
+        .join(format!("{}.wav", parsed_uuid));
+
+    read_wav_response(&disk_path).await
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ChatTtsRequest {
+    pub text: String,
+}
+
+/// Cleans Markdown links, bare URLs, and Markdown formatting symbols so TTS reads naturally.
+pub fn sanitize_text_for_tts(raw: &str) -> String {
+    static MD_LINK_RE: OnceLock<Regex> = OnceLock::new();
+    static BARE_URL_RE: OnceLock<Regex> = OnceLock::new();
+    static ITALIC_RE: OnceLock<Regex> = OnceLock::new();
+    static HEADING_RE: OnceLock<Regex> = OnceLock::new();
+    static BULLET_RE: OnceLock<Regex> = OnceLock::new();
+    static HORIZ_WS_RE: OnceLock<Regex> = OnceLock::new();
+
+    let md_link_re = MD_LINK_RE
+        .get_or_init(|| Regex::new(r"\[([^\]]+)\]\((https?://[^\s)]+)\)").expect("valid md link regex"));
+    let bare_url_re = BARE_URL_RE
+        .get_or_init(|| Regex::new(r"https?://\S+").expect("valid bare url regex"));
+    let italic_re = ITALIC_RE
+        .get_or_init(|| Regex::new(r"\*([^*\n]+)\*").expect("valid italic regex"));
+    let heading_re = HEADING_RE
+        .get_or_init(|| Regex::new(r"^[ \t]*#{1,6}[ \t]*").expect("valid heading regex"));
+    let bullet_re = BULLET_RE
+        .get_or_init(|| Regex::new(r"^[ \t]*(?:[-*+•])[ \t]+").expect("valid bullet regex"));
+    let horiz_ws_re = HORIZ_WS_RE
+        .get_or_init(|| Regex::new(r"[ \t]{2,}").expect("valid whitespace regex"));
+
+    let step1 = md_link_re.replace_all(raw, "$1");
+    let step2 = bare_url_re.replace_all(&step1, "");
+    let step3 = step2
+        .replace("**", "")
+        .replace("__", "")
+        .replace('`', "");
+    let step4 = italic_re.replace_all(&step3, "$1");
+
+    let lines: Vec<String> = step4
+        .lines()
+        .filter_map(|line| {
+            let no_heading = heading_re.replace(line, "");
+            let no_bullet = bullet_re.replace(&no_heading, "");
+            let collapsed = horiz_ws_re.replace_all(no_bullet.trim(), " ");
+            let cleaned = collapsed.trim();
+            if cleaned.is_empty() {
+                None
+            } else {
+                Some(cleaned.to_string())
+            }
+        })
+        .collect();
+
+    lines.join("\n")
+}
+
+pub async fn generate_chat_tts(
+    _auth: DeviceAuth,
+    State(state): State<AppState>,
+    Json(req): Json<ChatTtsRequest>,
+) -> Result<Json<AudioResponse>, AppError> {
+    let sanitized = sanitize_text_for_tts(&req.text);
+    if sanitized.is_empty() {
+        return Err(AppError::BadRequest("沒有可轉為語音的文字內容。".to_string()));
+    }
+
+    let text = truncate_chars(&sanitized, 3000);
+    let (model, voice, style) = state.gemini.tts_cache_fingerprint();
+    let fingerprint = format!("{model}|{voice}|{style}|{text}");
+    let hash = hex::encode(Sha256::digest(fingerprint.as_bytes()));
+
+    let filename = format!("chat-{hash}.wav");
+    let disk_path = state.audio_cache_dir.join(&filename);
+
+    if disk_path.exists() {
+        return Ok(Json(AudioResponse {
+            audio_url: format!("/api/tts/audio/{hash}"),
+        }));
+    }
+
+    let wav_bytes = state.gemini.generate_tts_wav(&text).await?;
+    tokio::fs::write(&disk_path, &wav_bytes)
+        .await
+        .map_err(|e| AppError::Internal(format!("寫入語音快取檔失敗：{e}")))?;
+
+    Ok(Json(AudioResponse {
+        audio_url: format!("/api/tts/audio/{hash}"),
+    }))
+}
+
+pub async fn serve_chat_audio(
+    State(state): State<AppState>,
+    AxumPath(audio_hash): AxumPath<String>,
+) -> Result<impl IntoResponse, AppError> {
+    if audio_hash.len() != 64
+        || !audio_hash
+            .bytes()
+            .all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f'))
+    {
+        return Err(AppError::BadRequest("無效的語音識別碼。".to_string()));
+    }
+
+    let disk_path = state.audio_cache_dir.join(format!("chat-{audio_hash}.wav"));
+    read_wav_response(&disk_path).await
 }
 
 fn format_stay_for_prompt(duration_minutes: i64) -> String {
@@ -387,7 +498,7 @@ fn web_search_prompt_instruction(enabled: bool) -> &'static str {
 pub async fn chat_day(
     auth: DeviceAuth,
     State(state): State<AppState>,
-    Path((trip_id, day_number)): Path<(String, i64)>,
+    AxumPath((trip_id, day_number)): AxumPath<(String, i64)>,
     Json(req): Json<ChatRequest>,
 ) -> Result<Json<ChatResponse>, AppError> {
     let day_row = sqlx::query(
@@ -461,7 +572,7 @@ pub async fn chat_day(
 pub async fn chat_item(
     auth: DeviceAuth,
     State(state): State<AppState>,
-    Path(item_id): Path<i64>,
+    AxumPath(item_id): AxumPath<i64>,
     Json(req): Json<ChatRequest>,
 ) -> Result<Json<ChatResponse>, AppError> {
     let item_row = sqlx::query(
@@ -524,4 +635,38 @@ pub async fn chat_item(
         sources: output.sources,
         search_queries: output.search_queries,
     }))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn sanitize_text_for_tts_keeps_markdown_link_labels_and_strips_bare_urls() {
+        let input = "建議先看 [大阪城官網](https://www.osakacastle.net/ticket?lang=zh) 確認開館時間，或參考 https://travel.example.com/osaka/info 。";
+        assert_eq!(
+            sanitize_text_for_tts(input),
+            "建議先看 大阪城官網 確認開館時間，或參考 。"
+        );
+
+        let bare_only = "詳情請見 https://www.kiyomizudera.or.jp/ 和 http://kyoto.travel/en";
+        assert_eq!(sanitize_text_for_tts(bare_only), "詳情請見 和");
+    }
+
+    #[test]
+    fn sanitize_text_for_tts_cleans_markdown_headings_bullets_bold_and_whitespace() {
+        let input = "###   今日推薦路線  \n\n- **清水寺**：早晨光線最好\n* __二寧坂__：逛街吃`抹茶冰淇淋`\n+ *傍晚*前往鴨川散步\n\n\n";
+        assert_eq!(
+            sanitize_text_for_tts(input),
+            "今日推薦路線\n清水寺：早晨光線最好\n二寧坂：逛街吃抹茶冰淇淋\n傍晚前往鴨川散步"
+        );
+    }
+
+    #[test]
+    fn sanitize_text_for_tts_returns_empty_when_only_urls_or_symbols() {
+        assert_eq!(
+            sanitize_text_for_tts("  https://example.com   **__`###`__**  "),
+            ""
+        );
+    }
 }

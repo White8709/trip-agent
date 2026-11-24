@@ -243,26 +243,36 @@ export const TimelinePage: React.FC<TimelinePageProps> = ({
                         <button
                           type="button"
                           onClick={() => onSelectGuide(item)}
-                          className="inline-flex items-center gap-1.5 text-primary dark:text-[#ff9c85] bg-primary-fixed/45 dark:bg-primary/20 hover:bg-primary-fixed dark:hover:bg-primary/30 font-label-md text-label-md px-3 py-1.5 rounded-full transition-colors active:scale-95"
+                          aria-label="AI 導覽"
+                          title="AI 導覽"
+                          className="relative w-9 h-9 rounded-full inline-flex items-center justify-center text-primary dark:text-[#ff9c85] bg-primary-fixed/45 dark:bg-primary/20 hover:bg-primary-fixed dark:hover:bg-primary/30 transition-colors active:scale-95"
                         >
-                          <span className="material-symbols-outlined text-[15px]">
+                          <span
+                            aria-hidden="true"
+                            className="material-symbols-outlined text-[18px] select-none"
+                          >
                             auto_awesome
                           </span>
-                          <span>AI 導覽</span>
                           {hasCachedGuide && (
                             <span
                               title="已有導覽快取"
-                              className="w-1.5 h-1.5 rounded-full bg-tertiary dark:bg-emerald-400 ml-0.5"
+                              className="absolute -top-0.5 -right-0.5 w-2.5 h-2.5 rounded-full bg-tertiary dark:bg-emerald-400 ring-2 ring-surface-container-lowest dark:ring-[#1E2026]"
                             />
                           )}
                         </button>
 
                         {hasCachedGuide && (
-                          <span className="text-label-sm font-label-sm text-tertiary dark:text-emerald-400 flex items-center gap-1">
-                            <span className="material-symbols-outlined text-[14px]">
+                          <span
+                            aria-label="已備妥導覽"
+                            title="已備妥導覽"
+                            className="text-tertiary dark:text-emerald-400 inline-flex items-center justify-center"
+                          >
+                            <span
+                              aria-hidden="true"
+                              className="material-symbols-outlined text-[16px] select-none"
+                            >
                               check_circle
                             </span>
-                            已備妥導覽
                           </span>
                         )}
                       </div>
@@ -276,10 +286,7 @@ export const TimelinePage: React.FC<TimelinePageProps> = ({
       </main>
 
       {/* Floating Action Button (Day AI Chat) */}
-      <aside className="fixed bottom-6 right-6 z-40 flex items-center gap-2 pb-safe">
-        <div className="hidden sm:flex px-3 py-1.5 rounded-full bg-inverse-surface/90 dark:bg-black/90 text-inverse-on-surface dark:text-white font-label-md text-label-md shadow-md backdrop-blur-sm pointer-events-none">
-          AI 行程助手
-        </div>
+      <aside className="fixed bottom-6 right-6 z-40 flex items-center pb-safe">
         <button
           type="button"
           onClick={() => setDayChatOpen(true)}
@@ -287,7 +294,9 @@ export const TimelinePage: React.FC<TimelinePageProps> = ({
           title="當天 AI 行程助手"
           className="w-14 h-14 rounded-full bg-primary-container text-on-primary flex items-center justify-center shadow-lg hover:shadow-xl active:scale-95 transition-all duration-200"
         >
-          <span className="material-symbols-outlined text-[26px]">auto_awesome</span>
+          <span aria-hidden="true" className="material-symbols-outlined text-[26px] select-none">
+            auto_awesome
+          </span>
         </button>
       </aside>
 

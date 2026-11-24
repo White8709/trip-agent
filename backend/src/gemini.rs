@@ -20,6 +20,7 @@ pub struct GeminiConfig {
     pub tts_model: String,
     pub tts_voice: String,
     pub tts_style: String,
+    pub stt_model: String,
 }
 
 #[derive(Debug, Clone)]
@@ -59,6 +60,22 @@ impl GeminiClient {
             ));
         }
         Ok(key)
+    }
+
+    pub fn api_key_checked(&self) -> Result<&str, AppError> {
+        self.ensure_api_key()
+    }
+
+    pub fn stt_model(&self) -> &str {
+        self.config.stt_model.trim()
+    }
+
+    pub fn tts_cache_fingerprint(&self) -> (&str, &str, &str) {
+        (
+            &self.config.tts_model,
+            &self.config.tts_voice,
+            &self.config.tts_style,
+        )
     }
 
     pub async fn generate_guide(

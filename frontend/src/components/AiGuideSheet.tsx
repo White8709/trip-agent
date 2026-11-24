@@ -282,9 +282,14 @@ export const AiGuideSheet: React.FC<AiGuideSheetProps> = ({
         <div className="px-5 pt-2 pb-3 border-b border-surface-container-high/50 dark:border-white/[0.07] flex items-start justify-between gap-3 shrink-0">
           <div className="min-w-0">
             <div className="flex items-center gap-2 mb-1">
-              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-primary-fixed/60 dark:bg-primary/20 text-primary dark:text-[#ff9c85] text-label-sm font-label-sm font-semibold">
-                <span className="material-symbols-outlined text-[13px]">auto_awesome</span>
-                AI 景點導覽
+              <span
+                aria-label="AI 景點導覽"
+                title="AI 景點導覽"
+                className="w-6 h-6 rounded-full inline-flex items-center justify-center bg-primary-fixed/60 dark:bg-primary/20 text-primary dark:text-[#ff9c85] shrink-0"
+              >
+                <span aria-hidden="true" className="material-symbols-outlined text-[14px] select-none">
+                  auto_awesome
+                </span>
               </span>
               <span className="text-label-sm font-label-sm text-on-surface-variant dark:text-slate-400 tabular-nums">
                 {item.start_time} ・ {formatStayDuration(item.duration_minutes)}
@@ -313,14 +318,16 @@ export const AiGuideSheet: React.FC<AiGuideSheetProps> = ({
               onClick={onCycleFontSize}
               title={`切換字體大小（目前：${fontSizeLabel}）`}
               aria-label={`切換字體大小，目前${fontSizeLabel}`}
-              className="h-9 px-2.5 rounded-full inline-flex items-center gap-1 bg-surface-container-low dark:bg-[#24272E] border border-surface-container-high/70 dark:border-white/[0.08] text-on-surface-variant dark:text-slate-300 hover:bg-surface-container dark:hover:bg-[#2E323C] text-label-sm font-label-sm transition-colors active:scale-95"
+              className="w-9 h-9 rounded-full inline-flex items-center justify-center bg-surface-container-low dark:bg-[#24272E] border border-surface-container-high/70 dark:border-white/[0.08] text-on-surface-variant dark:text-slate-300 hover:bg-surface-container dark:hover:bg-[#2E323C] transition-colors active:scale-95"
             >
-              <span className="material-symbols-outlined text-[16px]">format_size</span>
-              <span>{fontSizeLabel}</span>
+              <span aria-hidden="true" className="material-symbols-outlined text-[18px] select-none">
+                format_size
+              </span>
             </button>
             <button
               type="button"
               onClick={onClose}
+              title="關閉導覽視窗"
               aria-label="關閉導覽視窗"
               className="w-9 h-9 rounded-full flex items-center justify-center text-on-surface-variant dark:text-slate-400 hover:bg-surface-container dark:hover:bg-[#2A2D35] transition-colors"
             >
@@ -335,28 +342,36 @@ export const AiGuideSheet: React.FC<AiGuideSheetProps> = ({
             <button
               type="button"
               onClick={() => setActiveTab('guide')}
-              className={`h-8 rounded-lg text-label-md font-label-md inline-flex items-center justify-center gap-1.5 transition-all ${
+              aria-label="導覽與語音"
+              title="導覽與語音"
+              aria-pressed={activeTab === 'guide'}
+              className={`h-8 rounded-lg inline-flex items-center justify-center transition-all ${
                 activeTab === 'guide'
                   ? 'bg-surface-container-lowest dark:bg-[#1A1D24] text-on-surface dark:text-white shadow-sm'
                   : 'text-on-surface-variant dark:text-slate-400 hover:text-on-surface dark:hover:text-slate-200'
               }`}
             >
-              <span className="material-symbols-outlined text-[16px]">menu_book</span>
-              <span>導覽與語音</span>
+              <span aria-hidden="true" className="material-symbols-outlined text-[18px] select-none">
+                menu_book
+              </span>
             </button>
             <button
               type="button"
               onClick={() => setActiveTab('chat')}
-              className={`h-8 rounded-lg text-label-md font-label-md inline-flex items-center justify-center gap-1.5 transition-all ${
+              aria-label="景點 AI 對話"
+              title="景點 AI 對話"
+              aria-pressed={activeTab === 'chat'}
+              className={`relative h-8 rounded-lg inline-flex items-center justify-center transition-all ${
                 activeTab === 'chat'
                   ? 'bg-surface-container-lowest dark:bg-[#1A1D24] text-primary dark:text-[#ff9c85] shadow-sm'
                   : 'text-on-surface-variant dark:text-slate-400 hover:text-on-surface dark:hover:text-slate-200'
               }`}
             >
-              <span className="material-symbols-outlined text-[16px]">forum</span>
-              <span>景點 AI 對話</span>
+              <span aria-hidden="true" className="material-symbols-outlined text-[18px] select-none">
+                forum
+              </span>
               {itemMessages.length > 0 && (
-                <span className="w-1.5 h-1.5 rounded-full bg-primary-container" />
+                <span className="absolute top-1.5 right-3 w-1.5 h-1.5 rounded-full bg-primary-container" />
               )}
             </button>
           </div>
@@ -388,13 +403,18 @@ export const AiGuideSheet: React.FC<AiGuideSheetProps> = ({
                 key={opt.id}
                 type="button"
                 onClick={() => setStyle(opt.id)}
+                aria-label={opt.label}
+                title={isCached ? `${opt.label}（已快取）` : opt.label}
+                aria-pressed={active}
                 className={`shrink-0 h-8 px-3 rounded-full text-label-md font-label-md inline-flex items-center gap-1.5 transition-all active:scale-95 ${
                   active
                     ? 'bg-primary-container text-on-primary shadow-sm'
                     : 'bg-surface-container-lowest dark:bg-[#24272E] text-on-surface-variant dark:text-slate-300 border border-surface-container-high/70 dark:border-white/[0.08] hover:bg-surface-container dark:hover:bg-[#2E323C]'
                 }`}
               >
-                <span className="material-symbols-outlined text-[15px]">{opt.icon}</span>
+                <span aria-hidden="true" className="material-symbols-outlined text-[15px] select-none">
+                  {opt.icon}
+                </span>
                 <span>{opt.label}</span>
                 {isCached && !active && (
                   <span
@@ -457,10 +477,13 @@ export const AiGuideSheet: React.FC<AiGuideSheetProps> = ({
                     type="button"
                     onClick={handleRegenerateText}
                     disabled={loadingText || loadingAudio}
-                    className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-label-sm font-label-sm text-on-surface-variant dark:text-slate-300 bg-surface-container-low dark:bg-[#24272E] hover:bg-surface-container dark:hover:bg-[#2E323C] transition-colors disabled:opacity-50"
+                    aria-label="重新生成導覽文案"
+                    title="重新生成導覽文案"
+                    className="w-8 h-8 rounded-full inline-flex items-center justify-center text-on-surface-variant dark:text-slate-300 bg-surface-container-low dark:bg-[#24272E] hover:bg-surface-container dark:hover:bg-[#2E323C] transition-colors active:scale-95 disabled:opacity-50"
                   >
-                    <span className="material-symbols-outlined text-[14px]">refresh</span>
-                    <span>重新生成文案</span>
+                    <span aria-hidden="true" className="material-symbols-outlined text-[17px] select-none">
+                      refresh
+                    </span>
                   </button>
                 </div>
                 <p className="text-body-md font-body-md text-on-surface-variant dark:text-slate-300 leading-relaxed bg-surface-container-low/60 dark:bg-[#22252D] rounded-xl p-3.5">
@@ -579,26 +602,25 @@ export const AiGuideSheet: React.FC<AiGuideSheetProps> = ({
         {guide && !loadingText && (
           <div className="px-5 py-3.5 bg-surface-container-low/90 dark:bg-[#14171D] border-t border-surface-container-high/60 dark:border-white/[0.08] shrink-0">
             {!guide.audio_url ? (
-              <button
-                type="button"
-                onClick={() => handleGenerateAudio(false)}
-                disabled={loadingAudio}
-                className="w-full h-12 rounded-xl bg-primary-container text-on-primary font-headline-sm text-body-md font-semibold flex items-center justify-center gap-2 shadow-md hover:opacity-95 active:scale-[0.98] transition-all disabled:opacity-60"
-              >
-                {loadingAudio ? (
-                  <>
-                    <span className="material-symbols-outlined text-[19px] animate-spin">
-                      progress_activity
-                    </span>
-                    <span>正在生成 Gemini 語音導覽...</span>
-                  </>
-                ) : (
-                  <>
-                    <span className="material-symbols-outlined text-[20px]">graphic_eq</span>
-                    <span>生成語音導覽</span>
-                  </>
-                )}
-              </button>
+              <div className="flex justify-center">
+                <button
+                  type="button"
+                  onClick={() => handleGenerateAudio(false)}
+                  disabled={loadingAudio}
+                  aria-label="生成語音導覽"
+                  title="生成語音導覽"
+                  className="w-12 h-12 rounded-full bg-primary-container text-on-primary flex items-center justify-center shadow-md hover:opacity-95 active:scale-95 transition-all disabled:opacity-60"
+                >
+                  <span
+                    aria-hidden="true"
+                    className={`material-symbols-outlined text-[22px] select-none ${
+                      loadingAudio ? 'animate-spin' : ''
+                    }`}
+                  >
+                    {loadingAudio ? 'progress_activity' : 'graphic_eq'}
+                  </span>
+                </button>
+              </div>
             ) : (
               <div className="flex flex-col gap-2">
                 <audio
