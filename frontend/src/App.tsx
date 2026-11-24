@@ -1,11 +1,13 @@
 import { useCallback, useEffect, useState } from 'react';
 import { AiGuideSheet } from './components/AiGuideSheet';
 import { DeviceModal } from './components/DeviceModal';
+import { useFontSize } from './hooks/useFontSize';
 import { useTheme } from './hooks/useTheme';
 import {
   bindDevice,
   DeviceProfile,
   ensureDevice,
+  getCapabilities,
   getLatestTrip,
   GuideStyle,
   Trip,
@@ -19,10 +21,12 @@ type ViewMode = 'timeline' | 'import';
 
 export function App() {
   const { isDark, toggleTheme } = useTheme();
+  const { fontSize, fontSizeLabel, setFontSize, cycleFontSize } = useFontSize();
   const [bootstrapping, setBootstrapping] = useState(true);
   const [bootError, setBootError] = useState<string | null>(null);
   const [profile, setProfile] = useState<DeviceProfile | null>(null);
   const [trip, setTrip] = useState<Trip | null>(null);
+  const [webSearchAvailable, setWebSearchAvailable] = useState(false);
   const [view, setView] = useState<ViewMode>('import');
   const [selectedItem, setSelectedItem] = useState<TripItem | null>(null);
   const [deviceModalOpen, setDeviceModalOpen] = useState(false);
@@ -33,8 +37,12 @@ export function App() {
     try {
       const dev = await ensureDevice();
       setProfile(dev);
-      const latest = await getLatestTrip();
+      const [latest, caps] = await Promise.all([
+        getLatestTrip(),
+        getCapabilities().catch(() => ({ web_search_enabled: false })),
+      ]);
       setTrip(latest);
+      setWebSearchAvailable(caps.web_search_enabled);
       setView(latest ? 'timeline' : 'import');
     } catch (err) {
       setBootError(
@@ -137,6 +145,7 @@ export function App() {
         <TimelinePage
           trip={trip}
           isDark={isDark}
+          webSearchAvailable={webSearchAvailable}
           onToggleTheme={toggleTheme}
           onOpenDeviceModal={() => setDeviceModalOpen(true)}
           onSelectGuide={(item) => setSelectedItem(item)}
@@ -154,6 +163,9 @@ export function App() {
 
       <AiGuideSheet
         item={selectedItem}
+        webSearchAvailable={webSearchAvailable}
+        fontSizeLabel={fontSizeLabel}
+        onCycleFontSize={cycleFontSize}
         onClose={() => setSelectedItem(null)}
         onStyleCached={handleStyleCached}
       />
@@ -161,6 +173,8 @@ export function App() {
       <DeviceModal
         isOpen={deviceModalOpen}
         profile={profile}
+        fontSize={fontSize}
+        onChangeFontSize={setFontSize}
         onClose={() => setDeviceModalOpen(false)}
         onOpenImport={() => {
           setDeviceModalOpen(false);

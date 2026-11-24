@@ -86,6 +86,16 @@ pub struct LatestTripEnvelope {
     pub trip: Option<TripResponse>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+pub struct WebSource {
+    pub title: String,
+    pub url: String,
+}
+
+pub fn default_true() -> bool {
+    true
+}
+
 #[derive(Debug, Serialize)]
 pub struct GuideResponse {
     pub id: String,
@@ -96,6 +106,7 @@ pub struct GuideResponse {
     pub tips: Vec<String>,
     pub narration_script: String,
     pub audio_url: Option<String>,
+    pub sources: Vec<WebSource>,
     pub updated_at: String,
 }
 
@@ -118,9 +129,13 @@ pub struct ChatMessage {
 #[derive(Debug, Deserialize)]
 pub struct ChatRequest {
     pub messages: Vec<ChatMessage>,
+    #[serde(default = "default_true")]
+    pub enable_web_search: bool,
 }
 
 #[derive(Debug, Serialize)]
 pub struct ChatResponse {
     pub reply: String,
+    pub sources: Vec<WebSource>,
+    pub search_queries: Vec<String>,
 }

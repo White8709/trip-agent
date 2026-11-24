@@ -4,10 +4,12 @@ mod gemini;
 mod models;
 mod parser;
 mod routes;
+mod tavily;
 
 use std::{net::SocketAddr, path::PathBuf};
 
 use axum::{
+    extract::State,
     routing::{get, post},
     Json, Router,
 };
@@ -23,11 +25,12 @@ use crate::{
     db::{init_pool, AppState},
     gemini::{GeminiClient, GeminiConfig},
     routes::{auth, guides, trips},
+    tavily::{TavilyClient, TavilyConfig},
 };
 
 #[tokio::main]
 async fn main() {
-    dotenvy::dotenv().ok();
+    let dotenv_result = dotenvy::dotenv();
 
     tracing_subscriber::registry()
         .with(
@@ -36,6 +39,12 @@ async fn main() {
         )
         .with(tracing_subscriber::fmt::layer())
         .init();
+
+    if let Err(err) = dotenv_result {
+        if !err.not_found() {
+            tracing::error!(%err, "載入 .env 失敗，請檢查語法（含空白的值須加雙引號）");
+        }
+    }
 
     let host: std::net::IpAddr = std::env::var("HOST")
         .ok()
@@ -73,14 +82,30 @@ async fn main() {
             .unwrap_or_else(|_| "口語化台灣年輕女性, 1.2倍速".to_string()),
     };
 
+    let tavily_config = TavilyConfig {
+        api_key: std::env::var("TAVILY_API_KEY").unwrap_or_default(),
+        search_depth: std::env::var("TAVILY_SEARCH_DEPTH")
+            .ok()
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .unwrap_or_else(|| "basic".to_string()),
+        max_results: 5,
+    };
+
     let state = AppState {
         pool,
         gemini: GeminiClient::new(gemini_config),
+        tavily: TavilyClient::new(tavily_config),
         audio_cache_dir,
     };
 
+    tracing::info!(
+        web_search_enabled = state.tavily.is_enabled(),
+        "Tavily web search status"
+    );
+
     let api_router = Router::new()
-        .route("/api/health", get(|| async { Json(json!({ "ok": true })) }))
+        .route("/api/health", get(health))
         .route("/api/devices/register", post(auth::register_device))
         .route("/api/devices/me", get(auth::get_me).patch(auth::update_me))
         .route("/api/devices/bind", post(auth::bind_device))
@@ -124,4 +149,11 @@ async fn main() {
     axum::serve(listener, app)
         .await
         .expect("Axum server exited unexpectedly");
+}
+
+async fn health(State(state): State<AppState>) -> Json<serde_json::Value> {
+    Json(json!({
+        "ok": true,
+        "web_search_enabled": state.tavily.is_enabled()
+    }))
 }

@@ -37,6 +37,11 @@ export interface Trip {
   days: TripDay[];
 }
 
+export interface WebSource {
+  title: string;
+  url: string;
+}
+
 export interface Guide {
   id: string;
   item_id: number;
@@ -46,6 +51,7 @@ export interface Guide {
   tips: string[];
   narration_script: string;
   audio_url: string | null;
+  sources: WebSource[];
   updated_at: string;
 }
 
@@ -201,30 +207,80 @@ export async function generateGuideAudio(
 export interface ChatMessage {
   role: 'user' | 'model';
   content: string;
+  sources?: WebSource[];
+  search_queries?: string[];
+}
+
+export interface ChatResponsePayload {
+  reply: string;
+  sources: WebSource[];
+  search_queries: string[];
+}
+
+/**
+ * Filter web sources to only valid HTTP(S) URLs with normalized fields.
+ */
+export function filterSafeWebSources(sources?: WebSource[]): WebSource[] {
+  if (!Array.isArray(sources)) return [];
+  return sources.reduce<WebSource[]>((acc, src) => {
+    if (typeof src?.url !== 'string') return acc;
+    const trimmedUrl = src.url.trim();
+    if (!/^https?:\/\//i.test(trimmedUrl)) return acc;
+    acc.push({
+      title: typeof src.title === 'string' ? src.title.trim() : '',
+      url: trimmedUrl,
+    });
+    return acc;
+  }, []);
+}
+
+export async function getCapabilities(): Promise<{ web_search_enabled: boolean }> {
+  const data = await requestJson<{ ok?: boolean; web_search_enabled?: boolean }>(
+    '/api/health',
+    { method: 'GET' },
+    false,
+  );
+  return { web_search_enabled: Boolean(data?.web_search_enabled) };
 }
 
 export async function chatWithDay(
   tripId: string,
   dayNumber: number,
   messages: ChatMessage[],
-): Promise<string> {
-  const res = await requestJson<{ reply: string }>(
+  enableWebSearch = true,
+): Promise<{ reply: string; sources: WebSource[]; search_queries: string[] }> {
+  const res = await requestJson<Partial<ChatResponsePayload>>(
     `/api/trips/${encodeURIComponent(tripId)}/days/${dayNumber}/chat`,
     {
       method: 'POST',
-      body: JSON.stringify({ messages }),
+      body: JSON.stringify({
+        messages: messages.map(({ role, content }) => ({ role, content })),
+        enable_web_search: enableWebSearch,
+      }),
     },
   );
-  return res.reply;
+  return {
+    reply: res.reply ?? '',
+    sources: filterSafeWebSources(res.sources),
+    search_queries: Array.isArray(res.search_queries) ? res.search_queries : [],
+  };
 }
 
 export async function chatWithItem(
   itemId: number,
   messages: ChatMessage[],
-): Promise<string> {
-  const res = await requestJson<{ reply: string }>(`/api/items/${itemId}/chat`, {
+  enableWebSearch = true,
+): Promise<{ reply: string; sources: WebSource[]; search_queries: string[] }> {
+  const res = await requestJson<Partial<ChatResponsePayload>>(`/api/items/${itemId}/chat`, {
     method: 'POST',
-    body: JSON.stringify({ messages }),
+    body: JSON.stringify({
+      messages: messages.map(({ role, content }) => ({ role, content })),
+      enable_web_search: enableWebSearch,
+    }),
   });
-  return res.reply;
+  return {
+    reply: res.reply ?? '',
+    sources: filterSafeWebSources(res.sources),
+    search_queries: Array.isArray(res.search_queries) ? res.search_queries : [],
+  };
 }

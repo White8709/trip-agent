@@ -8,6 +8,7 @@ interface DayChatSheetProps {
   tripId: string;
   tripTitle: string;
   day: TripDay | null;
+  webSearchAvailable: boolean;
   onClose: () => void;
 }
 
@@ -22,11 +23,17 @@ export const DayChatSheet: React.FC<DayChatSheetProps> = ({
   tripId,
   tripTitle,
   day,
+  webSearchAvailable,
   onClose,
 }) => {
   const [historyByDay, setHistoryByDay] = useState<Record<number, ChatMessage[]>>({});
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [webSearchEnabled, setWebSearchEnabled] = useState(webSearchAvailable);
+
+  useEffect(() => {
+    setWebSearchEnabled(webSearchAvailable);
+  }, [webSearchAvailable]);
 
   useEffect(() => {
     setHistoryByDay({});
@@ -64,10 +71,23 @@ export const DayChatSheet: React.FC<DayChatSheetProps> = ({
     setError(null);
 
     try {
-      const reply = await chatWithDay(tripId, dayNumber, nextMessages);
+      const result = await chatWithDay(
+        tripId,
+        dayNumber,
+        nextMessages,
+        webSearchAvailable && webSearchEnabled,
+      );
       setHistoryByDay((prev) => ({
         ...prev,
-        [dayNumber]: [...(prev[dayNumber] ?? nextMessages), { role: 'model', content: reply }],
+        [dayNumber]: [
+          ...(prev[dayNumber] ?? nextMessages),
+          {
+            role: 'model',
+            content: result.reply,
+            sources: result.sources,
+            search_queries: result.search_queries,
+          },
+        ],
       }));
     } catch (err) {
       setError(err instanceof Error ? err.message : 'AI 回覆失敗，請稍後再試。');
@@ -163,6 +183,9 @@ export const DayChatSheet: React.FC<DayChatSheetProps> = ({
           emptySubtitle="可以問我這天的動線順不順、景點間建議怎麼移動、附近必吃美食或備案調整！"
           starterPrompts={DAY_STARTER_PROMPTS}
           placeholder={`詢問第 ${day.day_number} 天行程問題...`}
+          webSearchAvailable={webSearchAvailable}
+          webSearchEnabled={webSearchEnabled}
+          onToggleWebSearch={() => setWebSearchEnabled((prev) => !prev)}
           onSend={(text) => void handleSend(text)}
         />
       </div>

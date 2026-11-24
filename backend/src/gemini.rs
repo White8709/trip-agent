@@ -7,8 +7,11 @@ use tokio_tungstenite::{connect_async, tungstenite::Message};
 
 use crate::{
     error::AppError,
-    models::{ChatMessage, GuideStyle},
+    models::{ChatMessage, GuideStyle, WebSource},
+    tavily::{dedupe_sources, TavilyClient},
 };
+
+const MAX_TOOL_ROUNDS: usize = 3;
 
 #[derive(Debug, Clone)]
 pub struct GeminiConfig {
@@ -31,6 +34,13 @@ pub struct GeneratedGuide {
     pub highlights: Vec<String>,
     pub tips: Vec<String>,
     pub narration_script: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct ChatOutput {
+    pub reply: String,
+    pub sources: Vec<WebSource>,
+    pub search_queries: Vec<String>,
 }
 
 impl GeminiClient {
@@ -57,6 +67,7 @@ impl GeminiClient {
         place_name: &str,
         duration_minutes: i64,
         style: GuideStyle,
+        web_context: Option<&str>,
     ) -> Result<GeneratedGuide, AppError> {
         let api_key = self.ensure_api_key()?;
         let url = format!(
@@ -70,8 +81,9 @@ impl GeminiClient {
             format!("預計停留 {} 分鐘", duration_minutes)
         };
 
-        let prompt = format!(
-            "你是一位專業且充滿溫度的繁體中文私人旅遊導覽員。請根據以下資訊為旅客撰寫專屬景點導覽：\n\
+        let today = chrono::Local::now().format("%Y-%m-%d").to_string();
+        let mut prompt = format!(
+            "你是一位專業且充滿溫度的繁體中文私人旅遊導覽員。今天日期是 {today}。請根據以下資訊為旅客撰寫專屬景點導覽：\n\
             - 行程主題：{trip_title}\n\
             - 景點/活動名稱：{place_name}\n\
             - 行程安排：{duration_desc}\n\
@@ -83,6 +95,12 @@ impl GeminiClient {
             4. narration_script：一段專為語音合成設計的口語導覽講稿（約 180 至 250 字），須像真人導覽員自然親切地對旅客說話，不可包含任何 Markdown 符號、項目符號或表情符號。",
             style_desc = style.prompt_instruction()
         );
+
+        if let Some(ctx) = web_context.map(str::trim).filter(|s| !s.is_empty()) {
+            prompt.push_str(&format!(
+                "\n\n以下是即時網路搜尋取得的最新參考資訊，請優先核對並融入最新的營業時間、門票價格、活動展覽或注意事項（同時仍須嚴格遵守上述 JSON schema 與四個欄位格式輸出）。在 `tips` 欄位中提及官網或查詢資訊時，可使用 [來源名稱](真實網址) 格式附上該資料來源的實際網址；但 `narration_script` 欄位必須保持純口語朗讀稿，絕對不可包含任何網址、http/https 連結或 Markdown 符號：\n{ctx}"
+            ));
+        }
 
         let body = json!({
             "contents": [{
@@ -136,8 +154,14 @@ impl GeminiClient {
         }
 
         let raw_text = payload
-            .pointer("/candidates/0/content/parts/0/text")
-            .and_then(|v| v.as_str())
+            .pointer("/candidates/0/content/parts")
+            .and_then(|v| v.as_array())
+            .and_then(|parts| {
+                parts
+                    .iter()
+                    .filter(|p| !p.get("thought").and_then(|v| v.as_bool()).unwrap_or(false))
+                    .find_map(|p| p.get("text").and_then(|v| v.as_str()))
+            })
             .ok_or_else(|| {
                 AppError::Upstream("Gemini Text API 回應中找不到導覽內容文字。".to_string())
             })?;
@@ -154,11 +178,12 @@ impl GeminiClient {
         })
     }
 
-    pub async fn chat(
+    pub async fn chat_with_tools(
         &self,
         system_instruction: &str,
         messages: &[ChatMessage],
-    ) -> Result<String, AppError> {
+        tavily: Option<&TavilyClient>,
+    ) -> Result<ChatOutput, AppError> {
         let api_key = self.ensure_api_key()?;
         let valid_messages: Vec<&ChatMessage> = messages
             .iter()
@@ -169,7 +194,7 @@ impl GeminiClient {
             return Err(AppError::BadRequest("請輸入想詢問的內容。".to_string()));
         }
 
-        let contents: Vec<Value> = valid_messages
+        let mut contents: Vec<Value> = valid_messages
             .into_iter()
             .map(|m| {
                 let role = if m.role.eq_ignore_ascii_case("model") {
@@ -189,7 +214,75 @@ impl GeminiClient {
             self.config.text_model, api_key
         );
 
-        let body = json!({
+        let active_tavily = tavily.filter(|client| client.is_enabled());
+        let mut collected_sources: Vec<WebSource> = Vec::new();
+        let mut search_queries: Vec<String> = Vec::new();
+
+        if let Some(client) = active_tavily {
+            for _round in 0..MAX_TOOL_ROUNDS {
+                let payload = self
+                    .send_chat_generate_content(&url, system_instruction, &contents, true)
+                    .await?;
+
+                let model_content = extract_model_content(&payload)?;
+                let parts = extract_parts_from_content(&model_content)?;
+
+                let function_calls: Vec<&Value> =
+                    parts.iter().filter_map(|p| p.get("functionCall")).collect();
+
+                if function_calls.is_empty() {
+                    let reply = join_text_parts(parts)?;
+                    return Ok(ChatOutput {
+                        reply,
+                        sources: dedupe_sources(collected_sources),
+                        search_queries,
+                    });
+                }
+
+                // Preserve raw model content (including thoughtSignature and functionCall.id).
+                contents.push(model_content.clone());
+
+                let mut fn_responses = Vec::with_capacity(function_calls.len());
+                for fc in function_calls {
+                    let resp = execute_tavily_tool_call(
+                        client,
+                        fc,
+                        &mut collected_sources,
+                        &mut search_queries,
+                    )
+                    .await;
+                    fn_responses.push(resp);
+                }
+
+                contents.push(json!({
+                    "role": "user",
+                    "parts": fn_responses
+                }));
+            }
+        }
+
+        let payload = self
+            .send_chat_generate_content(&url, system_instruction, &contents, false)
+            .await?;
+        let model_content = extract_model_content(&payload)?;
+        let parts = extract_parts_from_content(&model_content)?;
+        let reply = join_text_parts(parts)?;
+
+        Ok(ChatOutput {
+            reply,
+            sources: dedupe_sources(collected_sources),
+            search_queries,
+        })
+    }
+
+    async fn send_chat_generate_content(
+        &self,
+        url: &str,
+        system_instruction: &str,
+        contents: &[Value],
+        include_tools: bool,
+    ) -> Result<Value, AppError> {
+        let mut body = json!({
             "systemInstruction": {
                 "parts": [{ "text": system_instruction }]
             },
@@ -199,9 +292,13 @@ impl GeminiClient {
             }
         });
 
+        if include_tools {
+            body["tools"] = chat_tool_declarations();
+        }
+
         let res = self
             .http
-            .post(&url)
+            .post(url)
             .json(&body)
             .send()
             .await
@@ -223,27 +320,7 @@ impl GeminiClient {
             )));
         }
 
-        let parts = payload
-            .pointer("/candidates/0/content/parts")
-            .and_then(|v| v.as_array())
-            .ok_or_else(|| {
-                AppError::Upstream("Gemini Chat API 回應中找不到回覆內容。".to_string())
-            })?;
-
-        let reply: String = parts
-            .iter()
-            .filter_map(|p| p.get("text").and_then(|v| v.as_str()))
-            .collect::<Vec<_>>()
-            .join("\n");
-
-        let trimmed = reply.trim();
-        if trimmed.is_empty() {
-            return Err(AppError::Upstream(
-                "Gemini Chat API 回傳空白回覆，請稍後再試。".to_string(),
-            ));
-        }
-
-        Ok(trimmed.to_string())
+        Ok(payload)
     }
 
     pub async fn generate_tts_wav(&self, narration_script: &str) -> Result<Vec<u8>, AppError> {
@@ -532,6 +609,155 @@ enum LiveFrame {
     Closed(String),
 }
 
+fn chat_tool_declarations() -> Value {
+    json!([{
+        "functionDeclarations": [
+            {
+                "name": "web_search",
+                "description": "搜尋即時網路資訊，查詢景點最新營業時間、門票價格、公休日、天氣預報、交通異動、近期活動或在地餐廳評價。",
+                "parameters": {
+                    "type": "OBJECT",
+                    "properties": {
+                        "query": {
+                            "type": "STRING",
+                            "description": "精簡明確的搜尋關鍵字，可使用繁體中文、日文或英文。"
+                        }
+                    },
+                    "required": ["query"]
+                }
+            },
+            {
+                "name": "fetch_webpage",
+                "description": "讀取並擷取指定網址（URL）的網頁內文，適合使用者提供網址或需深入確認官網公告與活動頁面時使用。",
+                "parameters": {
+                    "type": "OBJECT",
+                    "properties": {
+                        "url": {
+                            "type": "STRING",
+                            "description": "完整的 http:// 或 https:// 網頁網址。"
+                        }
+                    },
+                    "required": ["url"]
+                }
+            }
+        ]
+    }])
+}
+
+fn extract_model_content(payload: &Value) -> Result<Value, AppError> {
+    payload
+        .pointer("/candidates/0/content")
+        .cloned()
+        .ok_or_else(|| AppError::Upstream("Gemini Chat API 回應中找不到回覆內容。".to_string()))
+}
+
+fn extract_parts_from_content(content: &Value) -> Result<&[Value], AppError> {
+    content
+        .get("parts")
+        .and_then(|v| v.as_array())
+        .map(Vec::as_slice)
+        .ok_or_else(|| AppError::Upstream("Gemini Chat API 回應中找不到回覆內容。".to_string()))
+}
+
+fn join_text_parts(parts: &[Value]) -> Result<String, AppError> {
+    let reply: String = parts
+        .iter()
+        .filter(|p| !p.get("thought").and_then(|v| v.as_bool()).unwrap_or(false))
+        .filter_map(|p| p.get("text").and_then(|v| v.as_str()))
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    let trimmed = reply.trim();
+    if trimmed.is_empty() {
+        return Err(AppError::Upstream(
+            "Gemini Chat API 回傳空白回覆，請稍後再試。".to_string(),
+        ));
+    }
+
+    Ok(trimmed.to_string())
+}
+
+async fn execute_tavily_tool_call(
+    client: &TavilyClient,
+    function_call: &Value,
+    collected_sources: &mut Vec<WebSource>,
+    search_queries: &mut Vec<String>,
+) -> Value {
+    let name = function_call
+        .get("name")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+    let args = function_call.get("args");
+
+    let response_obj = match name {
+        "web_search" => {
+            let query = args
+                .and_then(|a| a.get("query"))
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .trim();
+            if query.is_empty() {
+                json!({ "error": "搜尋關鍵字 query 不可為空白。" })
+            } else {
+                if !search_queries.iter().any(|q| q == query) {
+                    search_queries.push(query.to_string());
+                }
+                match client.search(query).await {
+                    Ok(results) => {
+                        for item in &results {
+                            collected_sources.push(WebSource {
+                                title: item.title.clone(),
+                                url: item.url.clone(),
+                            });
+                        }
+                        json!({ "results": results })
+                    }
+                    Err(err) => {
+                        tracing::warn!(%query, %err, "Tavily web_search tool call failed");
+                        json!({ "error": err.to_string() })
+                    }
+                }
+            }
+        }
+        "fetch_webpage" => {
+            let target_url = args
+                .and_then(|a| a.get("url"))
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .trim();
+            if target_url.is_empty() {
+                json!({ "error": "網頁網址 url 不可為空白。" })
+            } else {
+                match client.extract(target_url).await {
+                    Ok(Some(result)) => {
+                        collected_sources.push(WebSource {
+                            title: result.title.clone(),
+                            url: result.url.clone(),
+                        });
+                        json!({ "result": result })
+                    }
+                    Ok(None) => json!({ "error": "無法從該網址擷取有效網頁內容。" }),
+                    Err(err) => {
+                        tracing::warn!(url = %target_url, %err, "Tavily fetch_webpage tool call failed");
+                        json!({ "error": err.to_string() })
+                    }
+                }
+            }
+        }
+        other => json!({ "error": format!("未知的工具名稱：{other}") }),
+    };
+
+    let mut fn_resp = json!({
+        "name": name,
+        "response": response_obj,
+    });
+    if let Some(id) = function_call.get("id").filter(|v| !v.is_null()) {
+        fn_resp["id"] = id.clone();
+    }
+
+    json!({ "functionResponse": fn_resp })
+}
+
 async fn read_live_json<S, W>(read: &mut S, write: &mut W) -> Result<LiveFrame, AppError>
 where
     S: StreamExt<Item = Result<Message, tokio_tungstenite::tungstenite::Error>> + Unpin,
@@ -658,5 +884,28 @@ mod tests {
         );
         assert_eq!(parse_sample_rate("audio/pcm;rate=16000"), Some(16000));
         assert_eq!(parse_sample_rate("audio/pcm"), None);
+    }
+
+    #[test]
+    fn join_text_parts_skips_thought_parts_and_joins_visible_text() {
+        let parts = vec![
+            json!({ "thought": true, "text": "internal reasoning" }),
+            json!({ "text": "第一段回覆" }),
+            json!({ "text": "第二段回覆" }),
+        ];
+        assert_eq!(join_text_parts(&parts).unwrap(), "第一段回覆\n第二段回覆");
+    }
+
+    #[test]
+    fn chat_tool_declarations_defines_expected_functions() {
+        let tools = chat_tool_declarations();
+        let decls = tools[0]["functionDeclarations"]
+            .as_array()
+            .expect("functionDeclarations array");
+        let names: Vec<&str> = decls
+            .iter()
+            .filter_map(|d| d.get("name").and_then(|v| v.as_str()))
+            .collect();
+        assert_eq!(names, vec!["web_search", "fetch_webpage"]);
     }
 }

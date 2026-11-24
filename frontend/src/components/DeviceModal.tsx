@@ -1,9 +1,12 @@
 import React, { useEffect, useState } from 'react';
+import { FONT_SIZE_OPTIONS, FontSizePreset } from '../hooks/useFontSize';
 import { DeviceProfile } from '../lib/api';
 
 interface DeviceModalProps {
   isOpen: boolean;
   profile: DeviceProfile | null;
+  fontSize: FontSizePreset;
+  onChangeFontSize: (size: FontSizePreset) => void;
   onClose: () => void;
   onOpenImport: () => void;
   onUpdateName: (name: string) => Promise<void>;
@@ -13,6 +16,8 @@ interface DeviceModalProps {
 export const DeviceModal: React.FC<DeviceModalProps> = ({
   isOpen,
   profile,
+  fontSize,
+  onChangeFontSize,
   onClose,
   onOpenImport,
   onUpdateName,
@@ -109,7 +114,7 @@ export const DeviceModal: React.FC<DeviceModalProps> = ({
       onClick={onClose}
     >
       <div
-        className="w-full max-w-[400px] bg-surface-container-lowest dark:bg-[#1E2026] rounded-xl p-5 shadow-xl border border-transparent dark:border-white/[0.08] flex flex-col gap-4"
+        className="w-full max-w-[400px] max-h-[90dvh] overflow-y-auto bg-surface-container-lowest dark:bg-[#1E2026] rounded-xl p-5 shadow-xl border border-transparent dark:border-white/[0.08] flex flex-col gap-4"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between">
@@ -167,6 +172,54 @@ export const DeviceModal: React.FC<DeviceModalProps> = ({
             </span>
             <span className="material-symbols-outlined text-[18px]">arrow_forward</span>
           </button>
+        </div>
+
+        <div className="border-t border-surface-container-high/70 dark:border-white/[0.08]" />
+
+        {/* Font Size Section */}
+        <div className="flex flex-col gap-2">
+          <div className="flex items-center justify-between">
+            <span className="text-label-md font-label-md text-on-surface dark:text-slate-200 inline-flex items-center gap-1.5">
+              <span className="material-symbols-outlined text-[17px] text-primary dark:text-[#ff9c85]">
+                format_size
+              </span>
+              <span>字體大小</span>
+            </span>
+            <span className="text-label-sm font-label-sm text-on-surface-variant dark:text-slate-400">
+              {FONT_SIZE_OPTIONS.find((opt) => opt.id === fontSize)?.label ?? '標準'}
+            </span>
+          </div>
+
+          <div
+            role="group"
+            aria-label="字體大小"
+            className="grid grid-cols-4 gap-1 p-1 rounded-xl bg-surface-container-low dark:bg-[#14181F] border border-surface-container-high/60 dark:border-white/[0.06]"
+          >
+            {FONT_SIZE_OPTIONS.map((opt) => {
+              const active = fontSize === opt.id;
+              return (
+                <button
+                  key={opt.id}
+                  type="button"
+                  aria-pressed={active}
+                  onClick={() => onChangeFontSize(opt.id)}
+                  className={`h-9 rounded-lg text-label-md font-label-md transition-all active:scale-95 ${
+                    active
+                      ? 'bg-primary-container text-on-primary shadow-sm'
+                      : 'text-on-surface-variant dark:text-slate-300 hover:bg-surface-container dark:hover:bg-[#24272E]'
+                  }`}
+                >
+                  {opt.label}
+                </button>
+              );
+            })}
+          </div>
+
+          <div className="rounded-xl bg-surface-container-low/70 dark:bg-[#14181F] border border-surface-container-high/50 dark:border-white/[0.06] px-3 py-2.5">
+            <p className="text-body-sm font-body-sm text-on-surface-variant dark:text-slate-300 leading-relaxed">
+              預覽：11:10 關西國際機場 — 調整文字大小讓旅途閱讀更舒適
+            </p>
+          </div>
         </div>
 
         <div className="border-t border-surface-container-high/70 dark:border-white/[0.08]" />

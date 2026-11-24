@@ -11,6 +11,7 @@ import {
 interface TimelinePageProps {
   trip: Trip;
   isDark: boolean;
+  webSearchAvailable: boolean;
   onToggleTheme: () => void;
   onOpenDeviceModal: () => void;
   onSelectGuide: (item: TripItem) => void;
@@ -19,6 +20,7 @@ interface TimelinePageProps {
 export const TimelinePage: React.FC<TimelinePageProps> = ({
   trip,
   isDark,
+  webSearchAvailable,
   onToggleTheme,
   onOpenDeviceModal,
   onSelectGuide,
@@ -294,6 +296,7 @@ export const TimelinePage: React.FC<TimelinePageProps> = ({
         tripId={trip.id}
         tripTitle={trip.title}
         day={currentDay ?? null}
+        webSearchAvailable={webSearchAvailable}
         onClose={() => setDayChatOpen(false)}
       />
     </div>

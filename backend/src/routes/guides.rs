@@ -14,8 +14,10 @@ use crate::{
     error::AppError,
     models::{
         AudioResponse, ChatRequest, ChatResponse, GuideEnvelope, GuideResponse, GuideStyle,
+        WebSource,
     },
     routes::auth::DeviceAuth,
+    tavily::dedupe_sources,
 };
 
 #[derive(Debug, Deserialize)]
@@ -28,6 +30,8 @@ pub struct GenerateGuideRequest {
     pub style: Option<String>,
     #[serde(default)]
     pub force_regenerate: bool,
+    #[serde(default = "crate::models::default_true")]
+    pub enable_web_search: bool,
 }
 
 fn parse_style(opt: Option<&str>) -> Result<GuideStyle, AppError> {
@@ -78,12 +82,15 @@ fn row_to_guide_response(
     let tips_json: String = row.get("tips_json");
     let narration_script: String = row.get("narration_script");
     let audio_path: Option<String> = row.get("audio_path");
+    let sources_json: String = row.get("sources_json");
     let updated_at: String = row.get("updated_at");
 
     let highlights: Vec<String> = serde_json::from_str(&highlights_json)
         .map_err(|e| AppError::Internal(format!("解析 highlights JSON 失敗：{e}")))?;
     let tips: Vec<String> = serde_json::from_str(&tips_json)
         .map_err(|e| AppError::Internal(format!("解析 tips JSON 失敗：{e}")))?;
+    let sources: Vec<WebSource> = serde_json::from_str(&sources_json)
+        .map_err(|e| AppError::Internal(format!("解析 sources JSON 失敗：{e}")))?;
 
     let audio_url = audio_path.and_then(|filename| {
         if state.audio_cache_dir.join(&filename).exists() {
@@ -102,6 +109,7 @@ fn row_to_guide_response(
         tips,
         narration_script,
         audio_url,
+        sources,
         updated_at,
     })
 }
@@ -116,7 +124,7 @@ pub async fn get_guide(
     verify_item_ownership(&state, item_id, &auth.device_id).await?;
 
     let row = sqlx::query(
-        "SELECT id, item_id, style, story, highlights_json, tips_json, narration_script, audio_path, updated_at \
+        "SELECT id, item_id, style, story, highlights_json, tips_json, narration_script, audio_path, sources_json, updated_at \
          FROM ai_guides WHERE item_id = ? AND style = ?",
     )
     .bind(item_id)
@@ -143,7 +151,7 @@ pub async fn generate_guide(
         verify_item_ownership(&state, item_id, &auth.device_id).await?;
 
     let existing = sqlx::query(
-        "SELECT id, item_id, style, story, highlights_json, tips_json, narration_script, audio_path, updated_at \
+        "SELECT id, item_id, style, story, highlights_json, tips_json, narration_script, audio_path, sources_json, updated_at \
          FROM ai_guides WHERE item_id = ? AND style = ?",
     )
     .bind(item_id)
@@ -159,9 +167,57 @@ pub async fn generate_guide(
         }
     }
 
+    let mut web_context: Option<String> = None;
+    let mut sources: Vec<WebSource> = Vec::new();
+
+    if req.enable_web_search && state.tavily.is_enabled() {
+        let query = format!("{item_name} {trip_title} 營業時間 門票 景點特色");
+        match state.tavily.search(&query).await {
+            Ok(results) if !results.is_empty() => {
+                let mut snippets = Vec::with_capacity(results.len());
+                let mut raw_sources = Vec::with_capacity(results.len());
+                for (idx, item) in results.into_iter().enumerate() {
+                    let display_title = if item.title.is_empty() {
+                        item.url.clone()
+                    } else {
+                        item.title.clone()
+                    };
+                    snippets.push(format!(
+                        "[{}] {} ({})\n{}",
+                        idx + 1,
+                        display_title,
+                        item.url,
+                        item.content
+                    ));
+                    raw_sources.push(WebSource {
+                        title: item.title,
+                        url: item.url,
+                    });
+                }
+                web_context = Some(snippets.join("\n\n"));
+                sources = dedupe_sources(raw_sources);
+            }
+            Ok(_) => {}
+            Err(err) => {
+                tracing::warn!(
+                    %item_id,
+                    %item_name,
+                    %err,
+                    "Tavily search failed during generate_guide; continuing without web context"
+                );
+            }
+        }
+    }
+
     let generated = state
         .gemini
-        .generate_guide(&trip_title, &item_name, duration_minutes, style)
+        .generate_guide(
+            &trip_title,
+            &item_name,
+            duration_minutes,
+            style,
+            web_context.as_deref(),
+        )
         .await?;
 
     if let Some(ref row) = existing {
@@ -182,11 +238,13 @@ pub async fn generate_guide(
         .map_err(|e| AppError::Internal(format!("序列化 highlights 失敗：{e}")))?;
     let tips_json = serde_json::to_string(&generated.tips)
         .map_err(|e| AppError::Internal(format!("序列化 tips 失敗：{e}")))?;
+    let sources_json = serde_json::to_string(&sources)
+        .map_err(|e| AppError::Internal(format!("序列化 sources 失敗：{e}")))?;
 
     sqlx::query(
         "INSERT INTO ai_guides \
-         (id, item_id, style, story, highlights_json, tips_json, narration_script, audio_path, created_at, updated_at) \
-         VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?, ?) \
+         (id, item_id, style, story, highlights_json, tips_json, narration_script, audio_path, sources_json, created_at, updated_at) \
+         VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?) \
          ON CONFLICT(item_id, style) DO UPDATE SET \
            id = excluded.id, \
            story = excluded.story, \
@@ -194,6 +252,7 @@ pub async fn generate_guide(
            tips_json = excluded.tips_json, \
            narration_script = excluded.narration_script, \
            audio_path = NULL, \
+           sources_json = excluded.sources_json, \
            updated_at = excluded.updated_at",
     )
     .bind(&guide_id)
@@ -203,6 +262,7 @@ pub async fn generate_guide(
     .bind(&highlights_json)
     .bind(&tips_json)
     .bind(&generated.narration_script)
+    .bind(&sources_json)
     .bind(&now)
     .bind(&now)
     .execute(&state.pool)
@@ -218,6 +278,7 @@ pub async fn generate_guide(
             tips: generated.tips,
             narration_script: generated.narration_script,
             audio_url: None,
+            sources,
             updated_at: now,
         }),
     }))
@@ -315,6 +376,14 @@ fn format_stay_for_prompt(duration_minutes: i64) -> String {
     }
 }
 
+fn web_search_prompt_instruction(enabled: bool) -> &'static str {
+    if enabled {
+        "\n若要確認最新營業時間、門票價格、公休日、天氣預報、餐廳推薦或讀取旅客提供的特定網址，請主動使用 web_search 或 fetch_webpage 網路搜尋工具查詢最新資訊後再回答，勿捏造網址或未經查證的即時資訊。\n當你引用網路搜尋查到的官網、購票頁、餐廳或攻略文章時，請務必使用 [來源名稱](真實網址) 格式附上可點擊超連結（僅限工具實際回傳的網址，切勿自行編造 URL）；其餘文字仍維持純文字排版，不要使用 **粗體**、### 標題或 LaTeX。"
+    } else {
+        ""
+    }
+}
+
 pub async fn chat_day(
     auth: DeviceAuth,
     State(state): State<AppState>,
@@ -360,18 +429,33 @@ pub async fn chat_day(
         ));
     }
 
+    let today = chrono::Local::now().format("%Y-%m-%d").to_string();
+    let web_search_active = req.enable_web_search && state.tavily.is_enabled();
     let system_instruction = format!(
-        "你是一位貼心且熟悉當地旅遊的繁體中文（台灣用語）AI 行程助手。\n\
+        "你是一位貼心且熟悉當地旅遊的繁體中文（台灣用語）AI 行程助手。今天日期：{today}。\n\
         請完全根據旅客「當天」的真實行程資料回答問題，包含路線順暢度、交通與時間分配、附近美食或伴手禮、拍照與備案建議。\n\
-        回答請精簡好讀（適合手機螢幕閱讀），請用純文字搭配換行或「•」「1.」條列排版，切勿使用 Markdown 語法（如 **粗體**、### 標題）或 LaTeX 數學符號，也不要捏造行程表中不存在的預訂時間。\n\n\
+        回答請精簡好讀（適合手機螢幕閱讀），請用純文字搭配換行或「•」「1.」條列排版，切勿使用 Markdown 語法（如 **粗體**、### 標題）或 LaTeX 數學符號，也不要捏造行程表中不存在的預訂時間。{}\n\n\
         【行程主題】{trip_title}\n\
         【日期】第 {day_number} 天（{date}）\n\
         【當日行程表（依順序排列）】\n{}",
+        web_search_prompt_instruction(web_search_active),
         schedule_lines.join("\n")
     );
 
-    let reply = state.gemini.chat(&system_instruction, &req.messages).await?;
-    Ok(Json(ChatResponse { reply }))
+    let tavily = if req.enable_web_search {
+        Some(&state.tavily)
+    } else {
+        None
+    };
+    let output = state
+        .gemini
+        .chat_with_tools(&system_instruction, &req.messages, tavily)
+        .await?;
+    Ok(Json(ChatResponse {
+        reply: output.reply,
+        sources: output.sources,
+        search_queries: output.search_queries,
+    }))
 }
 
 pub async fn chat_item(
@@ -408,14 +492,17 @@ pub async fn chat_item(
     .await?
     .map(|r| r.get("story"));
 
+    let today = chrono::Local::now().format("%Y-%m-%d").to_string();
+    let web_search_active = req.enable_web_search && state.tavily.is_enabled();
     let mut system_instruction = format!(
-        "你是一位親切專業的繁體中文（台灣用語）私人旅遊導覽員。\n\
+        "你是一位親切專業的繁體中文（台灣用語）私人旅遊導覽員。今天日期：{today}。\n\
         旅客目前正在查看行程中的單一景點，請針對這個景點回答他的問題（例如必看亮點、必吃美食、停留時間安排、排隊技巧、親子或雨天備案等）。\n\
-        回答請簡潔自然、適合手機畫面閱讀；請使用純文字與換行或「•」「1.」條列，切勿使用 Markdown 語法（如 **粗體**、### 標題）或 LaTeX 數學符號。\n\n\
+        回答請簡潔自然、適合手機畫面閱讀；請使用純文字與換行或「•」「1.」條列，切勿使用 Markdown 語法（如 **粗體**、### 標題）或 LaTeX 數學符號。{}\n\n\
         【行程主題】{trip_title}\n\
         【日期與時段】第 {day_number} 天（{date}）{start_time}\n\
         【景點 / 活動名稱】{item_name}\n\
         【停留安排】{}",
+        web_search_prompt_instruction(web_search_active),
         format_stay_for_prompt(duration_minutes)
     );
 
@@ -423,6 +510,18 @@ pub async fn chat_item(
         system_instruction.push_str(&format!("\n【景點背景摘要】{story}"));
     }
 
-    let reply = state.gemini.chat(&system_instruction, &req.messages).await?;
-    Ok(Json(ChatResponse { reply }))
+    let tavily = if req.enable_web_search {
+        Some(&state.tavily)
+    } else {
+        None
+    };
+    let output = state
+        .gemini
+        .chat_with_tools(&system_instruction, &req.messages, tavily)
+        .await?;
+    Ok(Json(ChatResponse {
+        reply: output.reply,
+        sources: output.sources,
+        search_queries: output.search_queries,
+    }))
 }

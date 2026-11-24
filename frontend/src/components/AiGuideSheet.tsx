@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import {
   ChatMessage,
   chatWithItem,
+  filterSafeWebSources,
   generateGuide,
   generateGuideAudio,
   getGuide,
@@ -11,9 +12,13 @@ import {
 } from '../lib/api';
 import { formatStayDuration } from '../lib/parser';
 import { ChatPanel } from './ChatPanel';
+import { getSourceHost, LinkifiedText } from './LinkifiedText';
 
 interface AiGuideSheetProps {
   item: TripItem | null;
+  webSearchAvailable: boolean;
+  fontSizeLabel: string;
+  onCycleFontSize: () => void;
   onClose: () => void;
   onStyleCached: (itemId: number, style: GuideStyle) => void;
 }
@@ -44,6 +49,9 @@ function formatAudioSeconds(sec: number): string {
 
 export const AiGuideSheet: React.FC<AiGuideSheetProps> = ({
   item,
+  webSearchAvailable,
+  fontSizeLabel,
+  onCycleFontSize,
   onClose,
   onStyleCached,
 }) => {
@@ -59,6 +67,11 @@ export const AiGuideSheet: React.FC<AiGuideSheetProps> = ({
   const [chatByItem, setChatByItem] = useState<Record<number, ChatMessage[]>>({});
   const [chatSending, setChatSending] = useState(false);
   const [chatError, setChatError] = useState<string | null>(null);
+  const [webSearchEnabled, setWebSearchEnabled] = useState(webSearchAvailable);
+
+  useEffect(() => {
+    setWebSearchEnabled(webSearchAvailable);
+  }, [webSearchAvailable]);
 
   // Audio player state
   const audioRef = useRef<HTMLAudioElement | null>(null);
@@ -217,10 +230,22 @@ export const AiGuideSheet: React.FC<AiGuideSheetProps> = ({
     setChatError(null);
 
     try {
-      const reply = await chatWithItem(itemId, nextMessages);
+      const result = await chatWithItem(
+        itemId,
+        nextMessages,
+        webSearchAvailable && webSearchEnabled,
+      );
       setChatByItem((prev) => ({
         ...prev,
-        [itemId]: [...(prev[itemId] ?? nextMessages), { role: 'model', content: reply }],
+        [itemId]: [
+          ...(prev[itemId] ?? nextMessages),
+          {
+            role: 'model',
+            content: result.reply,
+            sources: result.sources,
+            search_queries: result.search_queries,
+          },
+        ],
       }));
     } catch (err) {
       setChatError(err instanceof Error ? err.message : 'AI 回覆失敗，請稍後再試。');
@@ -285,6 +310,16 @@ export const AiGuideSheet: React.FC<AiGuideSheetProps> = ({
             )}
             <button
               type="button"
+              onClick={onCycleFontSize}
+              title={`切換字體大小（目前：${fontSizeLabel}）`}
+              aria-label={`切換字體大小，目前${fontSizeLabel}`}
+              className="h-9 px-2.5 rounded-full inline-flex items-center gap-1 bg-surface-container-low dark:bg-[#24272E] border border-surface-container-high/70 dark:border-white/[0.08] text-on-surface-variant dark:text-slate-300 hover:bg-surface-container dark:hover:bg-[#2E323C] text-label-sm font-label-sm transition-colors active:scale-95"
+            >
+              <span className="material-symbols-outlined text-[16px]">format_size</span>
+              <span>{fontSizeLabel}</span>
+            </button>
+            <button
+              type="button"
               onClick={onClose}
               aria-label="關閉導覽視窗"
               className="w-9 h-9 rounded-full flex items-center justify-center text-on-surface-variant dark:text-slate-400 hover:bg-surface-container dark:hover:bg-[#2A2D35] transition-colors"
@@ -336,6 +371,9 @@ export const AiGuideSheet: React.FC<AiGuideSheetProps> = ({
             emptySubtitle="可以直接針對這個景點發問：附近美食、拍照機位、停留時間建議或雨天備案。"
             starterPrompts={ITEM_STARTER_PROMPTS}
             placeholder={`針對 ${item.name} 提問...`}
+            webSearchAvailable={webSearchAvailable}
+            webSearchEnabled={webSearchEnabled}
+            onToggleWebSearch={() => setWebSearchEnabled((prev) => !prev)}
             onSend={(text) => void handleSendChat(text)}
           />
         ) : (
@@ -426,7 +464,7 @@ export const AiGuideSheet: React.FC<AiGuideSheetProps> = ({
                   </button>
                 </div>
                 <p className="text-body-md font-body-md text-on-surface-variant dark:text-slate-300 leading-relaxed bg-surface-container-low/60 dark:bg-[#22252D] rounded-xl p-3.5">
-                  {guide.story}
+                  <LinkifiedText text={guide.story} />
                 </p>
               </section>
 
@@ -448,7 +486,9 @@ export const AiGuideSheet: React.FC<AiGuideSheetProps> = ({
                         <span className="w-5 h-5 rounded-full bg-secondary/15 dark:bg-sky-500/20 text-secondary dark:text-sky-300 text-label-sm font-bold flex items-center justify-center shrink-0 mt-0.5">
                           {idx + 1}
                         </span>
-                        <span>{hl}</span>
+                        <span>
+                          <LinkifiedText text={hl} />
+                        </span>
                       </li>
                     ))}
                   </ul>
@@ -473,12 +513,64 @@ export const AiGuideSheet: React.FC<AiGuideSheetProps> = ({
                         <span className="material-symbols-outlined text-[16px] text-tertiary dark:text-emerald-400 shrink-0 mt-0.5">
                           check_circle
                         </span>
-                        <span>{tip}</span>
+                        <span>
+                          <LinkifiedText text={tip} />
+                        </span>
                       </li>
                     ))}
                   </ul>
                 </section>
               )}
+
+              {/* Web Sources Section */}
+              {(() => {
+                const safeSources = filterSafeWebSources(guide.sources);
+                if (safeSources.length === 0) return null;
+                return (
+                  <section className="flex flex-col gap-2">
+                    <h3 className="font-headline-sm text-body-md font-semibold text-on-surface dark:text-white flex items-center gap-1.5">
+                      <span
+                        aria-hidden="true"
+                        className="material-symbols-outlined text-[18px] text-secondary dark:text-sky-400 select-none"
+                      >
+                        public
+                      </span>
+                      網路參考來源
+                    </h3>
+                    <ul className="flex flex-col gap-1.5">
+                      {safeSources.map((src, idx) => {
+                        const host = getSourceHost(src.url);
+                        return (
+                          <li key={`${src.url}-${idx}`}>
+                            <a
+                              href={src.url}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              title={src.url}
+                              className="flex items-center justify-between gap-2 px-3.5 py-2.5 rounded-xl bg-surface-container-low/70 dark:bg-[#22252D] border border-surface-container-high/60 dark:border-white/[0.06] hover:bg-surface-container dark:hover:bg-[#2A2E38] text-body-sm font-body-sm text-secondary dark:text-sky-300 transition-colors"
+                            >
+                              <div className="min-w-0 flex flex-col">
+                                <span className="truncate">{src.title || host || src.url}</span>
+                                {host && (
+                                  <span className="text-label-sm font-label-sm text-on-surface-variant/75 dark:text-slate-400 truncate">
+                                    {host}
+                                  </span>
+                                )}
+                              </div>
+                              <span
+                                aria-hidden="true"
+                                className="material-symbols-outlined text-[16px] shrink-0 select-none"
+                              >
+                                open_in_new
+                              </span>
+                            </a>
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  </section>
+                );
+              })()}
             </>
           ) : null}
         </div>
